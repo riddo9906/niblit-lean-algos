@@ -37,7 +37,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Validate lean.json
-        run:python -c "import json, sys; data = json.load(open('lean.json')); print('lean.json is valid JSON'); print(f'  organization-id: {data.get(\"organization-id\", \"(not set)\")}')"
+        run: |
+          python -c "import json, sys; data = json.load(open('lean.json')); print('lean.json is valid JSON'); print(f'  organization-id: {data.get(\"organization-id\", \"(not set)\")}')"
 
       - name: Syntax check — niblit_bridge
         run: |
@@ -45,7 +46,8 @@ jobs:
           python -m py_compile niblit_bridge/connector.py
 
       - name: Syntax check — scripts
-        run: python -m py_compile scripts/deploy_all_to_qc.py
+        run: |
+          python -m py_compile scripts/deploy_all_to_qc.py
 
       - name: Syntax check — all algorithm main.py files
         run: |
