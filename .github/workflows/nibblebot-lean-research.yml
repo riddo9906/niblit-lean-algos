@@ -1,0 +1,48 @@
+name: "🧠 Nibblebot: Lean Algo AI Research Scanner"
+
+# Scans the latest research in AI-driven quantitative trading — covering
+# reinforcement learning, transformer models for time-series, regime
+# detection, and ML-enhanced signal generation — then files a GitHub Issue
+# with the most actionable findings for niblit-lean-algos.
+
+on:
+  schedule:
+    - cron: "0 8 * * 2"  # Every Tuesday at 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      topics:
+        description: "Comma-separated topics to research"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run (print issue instead of creating it)"
+        required: false
+        default: "false"
+        type: boolean
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  research:
+    name: Run Lean Algo AI Research Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run lean algo AI research bot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          AIOS_TOPICS: ${{ inputs.topics || '' }}
+          AIOS_DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN || secrets.GITHUB_TOKEN }}
+          USE_GH_MODEL_REPORTS: ${{ vars.USE_GH_MODEL_REPORTS || 'false' }}
+        run: python nibblebots/aios_research_bot.py

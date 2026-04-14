@@ -1,0 +1,40 @@
+[MASTER]
+# Pylint config for niblit-lean-algos
+# Allow long lines (LEAN algo files tend to have descriptive names)
+max-line-length = 120
+
+# LEAN algorithm files use QCAlgorithm methods that pylint doesn't know about
+# Suppress attribute errors for LEAN API calls
+disable =
+    C0103,  # invalid-name  (short vars like q, p common in trading code)
+    C0114,  # missing-module-docstring
+    C0116,  # missing-function-docstring
+    R0902,  # too-many-instance-attributes
+    R0903,  # too-few-public-methods
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+    R0915,  # too-many-statements
+    W0212,  # protected-access (_private attributes are used idiomatically)
+    W0611,  # unused-import (AlgorithmImports wildcard)
+    W0614,  # unused-wildcard-import
+
+[FORMAT]
+indent-string = '    '
+max-line-length = 120
+
+[VARIABLES]
+# Allow short variable names common in trading/math code
+good-names = i,j,k,n,p,q,x,y,z,e,t,dt,df,ts,mu,sd,kw
+
+[SIMILARITIES]
+# LEAN algorithms share structural boilerplate — allow some similarity
+min-similarity-lines = 15
+
+[DESIGN]
+max-args = 10
+max-attributes = 20
+max-bool-expr = 6
+max-branches = 15
+max-locals = 25
+max-returns = 8
+max-statements = 60
