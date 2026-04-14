@@ -138,7 +138,7 @@ class NiblitBridge:
         try:
             if not os.path.isfile(self.signal_file):
                 return None
-            with open(self.signal_file, "r") as fh:
+            with open(self.signal_file, "r", encoding="utf-8") as fh:
                 data: Dict[str, Any] = json.load(fh)
         except (OSError, ValueError, json.JSONDecodeError):
             return None
