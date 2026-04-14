@@ -37,7 +37,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Validate lean.json
-        run: python -c "import json, sys; data = json.load(open('lean.json')); print('lean.json is valid JSON'); print(f'  organization-id: {data.get(\"organization-id\", \"(not set)\")}')"
+        run:python -c "import json, sys; data = json.load(open('lean.json')); print('lean.json is valid JSON'); print(f'  organization-id: {data.get(\"organization-id\", \"(not set)\")}')"
 
       - name: Syntax check — niblit_bridge
         run: |
