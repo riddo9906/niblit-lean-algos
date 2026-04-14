@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=duplicate-code
 """
 scripts/sync_signal.py — Write a Niblit-format trading signal to the shared
 signal file so that LEAN algorithms running locally can read it via NiblitBridge.
@@ -49,7 +50,7 @@ _SIGNAL_FILE = os.environ.get(
 # Signal read / write
 # ─────────────────────────────────────────────────────────────────────────────
 
-def write_signal(
+def write_signal(  # pylint: disable=too-many-positional-arguments
     signal:     str,
     confidence: float = 0.7,
     symbol:     str   = "SPY",
@@ -85,7 +86,7 @@ def write_signal(
 
     path = Path(_SIGNAL_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2))
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"✅ Signal written to {path}")
     _print_signal(payload)
 
@@ -97,7 +98,7 @@ def read_signal() -> None:
         print(f"⚠  No signal file found at {path}")
         return
     try:
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         print(f"❌ Could not read signal file: {exc}")
         return

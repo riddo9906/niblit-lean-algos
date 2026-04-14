@@ -64,7 +64,7 @@ def _load_credentials() -> tuple[str, str]:
                 params = json.loads(params_file.read_text())
                 user_id  = user_id  or str(params.get("QC_USER_ID", "")).strip()
                 api_cred = api_cred or str(params.get("QC_API_CRED", "")).strip()
-            except Exception:
+            except (ValueError, OSError):
                 pass
 
     return user_id, api_cred
@@ -104,7 +104,7 @@ def _api(
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         return {"error": f"HTTP {exc.code}: {exc.reason}"}
-    except Exception as exc:
+    except (urllib.error.URLError, OSError, ValueError) as exc:
         return {"error": str(exc)}
 
 
@@ -126,7 +126,7 @@ def _upload_file(
 ) -> bool:
     data = _api(
         "POST",
-        f"files/create",
+        "files/create",
         {"projectId": project_id, "name": filename, "content": content},
         user_id,
         api_cred,
@@ -138,7 +138,7 @@ def _upload_file(
 
 
 def _compile_project(project_id: int, user_id: str, api_cred: str) -> Optional[str]:
-    data = _api("POST", f"compile/create", {"projectId": project_id}, user_id, api_cred)
+    data = _api("POST", "compile/create", {"projectId": project_id}, user_id, api_cred)
     if "error" in data:
         print(f"  ❌ Compile failed: {data['error']}")
         return None
@@ -180,7 +180,7 @@ def discover_algorithms(prefix_filter: Optional[str] = None) -> List[tuple[str, 
     return algos
 
 
-def deploy_algorithm(
+def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
     algo_name: str,
     main_py: Path,
     user_id: str,
@@ -263,7 +263,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"\nFound {len(algos)} algorithm(s) to deploy:")
-    for name, path in algos:
+    for name, _ in algos:
         print(f"  • {name}")
 
     results = []
@@ -291,9 +291,22 @@ def main() -> None:
         out_file = _REPO_ROOT / args.save_ids
         out_file.write_text(json.dumps(results, indent=2))
         print(f"Project IDs saved to: {out_file}")
+
+        # Also write niblit_lean_deployed_projects.json at the Niblit root in
+        # the format LeanAlgoManager._load_deployed_ids() expects: {algo_name: project_id}.
+        lean_ids: Dict[str, int] = {
+            r["algo"]: r["project_id"] for r in deployed if isinstance(r.get("project_id"), int)
+        }
+        niblit_ids_file = _NIBLIT_ROOT / "niblit_lean_deployed_projects.json"
+        try:
+            niblit_ids_file.write_text(json.dumps(lean_ids, indent=2))
+            print(f"LeanAlgoManager IDs written to: {niblit_ids_file}")
+        except OSError as exc:
+            print(f"⚠️  Could not write {niblit_ids_file}: {exc}")
+
         print("\nTo start live practice trading, inside Niblit:")
         for r in deployed[:3]:
-            print(f"  lean deploy live {r['project_id']} PaperBrokerage")
+            print(f"  lean algo start {r['project_id']}")
         print("  (use the project IDs above)")
 
 

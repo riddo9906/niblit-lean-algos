@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=duplicate-code
 """
 scripts/backtest_all.py — Run backtests for all (or selected) Niblit LEAN algorithms.
 
@@ -56,7 +57,7 @@ def _load_credentials() -> tuple[str, str]:
                 params   = json.loads(params_file.read_text())
                 user_id  = user_id  or str(params.get("QC_USER_ID", "")).strip()
                 api_cred = api_cred or str(params.get("QC_API_CRED", "")).strip()
-            except Exception:
+            except (ValueError, OSError):
                 pass
     return user_id, api_cred
 
@@ -89,7 +90,7 @@ def _api(method: str, endpoint: str, payload: Optional[Dict[str, Any]],
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         return {"error": f"HTTP {exc.code}: {exc.reason}"}
-    except Exception as exc:
+    except (urllib.error.URLError, OSError, ValueError) as exc:
         return {"error": str(exc)}
 
 
