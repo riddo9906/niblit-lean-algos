@@ -240,10 +240,12 @@ class ForexMultiPair(QCAlgorithm):
         # For JPY pairs price ~150, pip=0.01; for others price ~1.x, pip=0.0001
         pip           = _PIP_SIZE[pair]
         pips_at_risk  = stop_dist / pip
-        # Value per pip ≈ pip_size * lot_size / price (USD account, non-USD quote)
-        # Simplified: dollar_per_pip = pip / price * lot_size
-        lot_size      = 100_000
-        dollar_per_pip = (pip / price) * lot_size if price > 1 else pip * lot_size
+        # Dollar value per pip: pip_size / price * lot_size gives the USD value
+        # of one pip regardless of the quote currency.  This formula works for
+        # both standard pairs (e.g. EURUSD, price ~1.1) and JPY pairs (price ~150)
+        # because pip and price scale together, keeping the ratio consistent.
+        lot_size       = 100_000
+        dollar_per_pip = (pip / price) * lot_size if price > 0 else pip * lot_size
         max_lots      = (dollar_risk / pips_at_risk) / dollar_per_pip if dollar_per_pip > 0 else 0
         # Cap at 5% of equity for any single pair
         max_notional  = equity * 0.05

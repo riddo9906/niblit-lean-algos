@@ -63,6 +63,11 @@ _META_LOG_FILE   = os.environ.get(
     os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_self_aware_state.json"),
 )
 
+# Minimum win-rate improvement (absolute) required before the algorithm
+# overrides the regime-based strategy choice.  Set conservatively at 5%
+# to avoid excessive strategy churning on small sample sizes.
+_STRATEGY_SWITCH_THRESHOLD = 0.05
+
 # Universe size cap when running multi-symbol (extend list as needed)
 _SYMBOL_ENV = os.environ.get("NIBLIT_SA_SYMBOL", "SPY").upper()
 
@@ -363,7 +368,7 @@ class SelfAwareAdaptive(QCAlgorithm):
             best_score    = self._strategy_score(regime_choice)
             for strat in ("trend", "mean_reversion", "volatility"):
                 s = self._strategy_score(strat)
-                if s > best_score + 0.05:   # 5% better win-rate required to switch
+                if s > best_score + _STRATEGY_SWITCH_THRESHOLD:
                     best_strategy = strat
                     best_score    = s
             return best_strategy
