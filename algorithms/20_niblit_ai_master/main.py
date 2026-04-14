@@ -38,7 +38,12 @@ _NIBLIT_WEIGHT   = 0.70
 _INTERNAL_WEIGHT = 0.30
 _DEFAULT_RISK    = 0.02
 _ATR_MULT        = 1.5
-_RESULTS_FILE    = "niblit_algo_results.json"   # written relative to working dir
+# Results file written so Niblit's LeanAlgoManager can read it back.
+# Matches NIBLIT_RESULTS_FILE env var default in modules/lean_algo_manager.py.
+_RESULTS_FILE    = os.environ.get(
+    "NIBLIT_RESULTS_FILE",
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_lean_results.json"),
+)
 
 
 def _resolve_symbol() -> str:
@@ -313,13 +318,9 @@ class NiblitAiMaster(QCAlgorithm):
         }
 
         try:
-            results_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                _RESULTS_FILE,
-            )
-            with open(results_path, "w") as fh:
+            with open(_RESULTS_FILE, "w") as fh:
                 json.dump(results, fh, indent=2)
-            self.log(f"Results written to {results_path}")
+            self.log(f"Results written to {_RESULTS_FILE}")
         except Exception as exc:
             self.log(f"Could not write results file: {exc}")
 

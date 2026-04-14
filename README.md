@@ -32,7 +32,9 @@ niblit-lean-algos/
 │   ├── 17_gradient_boosting/main.py
 │   ├── 18_transformer_attention/main.py
 │   ├── 19_sentiment_alpha/main.py
-│   └── 20_niblit_ai_master/main.py
+│   ├── 20_niblit_ai_master/main.py
+│   ├── 21_forex_multi_pair/main.py
+│   └── 22_self_aware_adaptive/main.py
 ├── scripts/
 │   └── deploy_all_to_qc.py ← batch deployment via Niblit's LeanDeployEngine
 ├── lean.json               ← LEAN workspace config
@@ -119,6 +121,8 @@ lean algo live <id>    ← start the master algorithm on paper brokerage
 | 18 | Transformer Attention | AI/ML | Attention weights | ✅ |
 | 19 | Sentiment Alpha | NLP/AI | News sentiment | ✅ |
 | 20 | **Niblit AI Master** | **AI Agent** | **All signals** | ✅ |
+| 21 | **Forex Multi-Pair** | **Forex/Trend** | **EMA+RSI multi-pair** | ✅ |
+| 22 | **Self-Aware Adaptive** | **AI/Self-Learn** | **Adaptive strategy** | ✅ |
 
 ## Environment Variables
 
@@ -128,6 +132,10 @@ lean algo live <id>    ← start the master algorithm on paper brokerage
 | `QC_API_CRED` | QuantConnect API token | For deployment |
 | `NIBLIT_SIGNAL_FILE` | Path to Niblit signal JSON | For AI Master |
 | `NIBLIT_ALGO_MODE` | `paper` or `live` | Optional |
+| `NIBLIT_RESULTS_FILE` | Path for AI Master results JSON (default: `/tmp/niblit_lean_results.json`) | For AI Master |
+| `NIBLIT_FOREX_PAIRS` | Comma-separated forex pairs (default: `EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD`) | For Forex Multi-Pair |
+| `NIBLIT_SA_SYMBOL` | Symbol for Self-Aware algo (default: `SPY`) | For Self-Aware Adaptive |
+| `NIBLIT_SA_META_FILE` | Path for self-assessment JSON (default: `/tmp/niblit_self_aware_state.json`) | For Self-Aware Adaptive |
 
 ## Notes
 

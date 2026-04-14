@@ -291,9 +291,22 @@ def main() -> None:
         out_file = _REPO_ROOT / args.save_ids
         out_file.write_text(json.dumps(results, indent=2))
         print(f"Project IDs saved to: {out_file}")
+
+        # Also write niblit_lean_deployed_projects.json at the Niblit root in
+        # the format LeanAlgoManager._load_deployed_ids() expects: {algo_name: project_id}.
+        lean_ids: Dict[str, int] = {
+            r["algo"]: r["project_id"] for r in deployed if isinstance(r.get("project_id"), int)
+        }
+        niblit_ids_file = _NIBLIT_ROOT / "niblit_lean_deployed_projects.json"
+        try:
+            niblit_ids_file.write_text(json.dumps(lean_ids, indent=2))
+            print(f"LeanAlgoManager IDs written to: {niblit_ids_file}")
+        except OSError as exc:
+            print(f"⚠️  Could not write {niblit_ids_file}: {exc}")
+
         print("\nTo start live practice trading, inside Niblit:")
         for r in deployed[:3]:
-            print(f"  lean deploy live {r['project_id']} PaperBrokerage")
+            print(f"  lean algo start {r['project_id']}")
         print("  (use the project IDs above)")
 
 
