@@ -2,9 +2,9 @@
 """
 scripts/deploy_all_to_qc.py — Deploy all Niblit LEAN algorithms to QuantConnect Cloud.
 
-Uses Niblit's LeanDeployEngine (modules/lean_deploy_engine.py) REST API client
-to create projects on QuantConnect, upload algorithm code, and optionally run
-an initial backtest to validate each algorithm.
+Uses the shared QCClient (scripts/qc_client.py) to create projects on
+QuantConnect, upload algorithm code, and optionally run an initial backtest
+to validate each algorithm.
 
 Usage
 -----
@@ -20,22 +20,21 @@ Environment variables required:
     QC_USER_ID   — QuantConnect numeric user ID
     QC_API_CRED  — QuantConnect API token
 
-Both can also be set in niblit_params.json in the Niblit root directory.
+Both can also be set in a .env file in the repo root, or in niblit_params.json
+in the Niblit root directory.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import urllib.request
-import urllib.error
-import base64
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qc_client import QCClient  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
@@ -45,118 +44,6 @@ _SCRIPT_DIR  = Path(__file__).resolve().parent
 _REPO_ROOT   = _SCRIPT_DIR.parent
 _ALGOS_DIR   = _REPO_ROOT / "algorithms"
 _NIBLIT_ROOT = _REPO_ROOT.parent  # sibling: .../Niblit/
-
-_QC_API_BASE = "https://www.quantconnect.com/api/v2"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Credentials
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_credentials() -> tuple[str, str]:
-    """Return (user_id, api_token) from env or niblit_params.json."""
-    user_id  = os.environ.get("QC_USER_ID", "").strip()
-    api_cred = os.environ.get("QC_API_CRED", "").strip()
-
-    if not user_id or not api_cred:
-        params_file = _NIBLIT_ROOT / "niblit_params.json"
-        if params_file.exists():
-            try:
-                params = json.loads(params_file.read_text())
-                user_id  = user_id  or str(params.get("QC_USER_ID", "")).strip()
-                api_cred = api_cred or str(params.get("QC_API_CRED", "")).strip()
-            except (ValueError, OSError):
-                pass
-
-    return user_id, api_cred
-
-
-def _auth_headers(user_id: str, api_cred: str) -> Dict[str, str]:
-    """Build QuantConnect HMAC-SHA256 auth header."""
-    ts = str(int(time.time()))
-    digest_input = f"{ts}:{api_cred}".encode()
-    hash_hex = hashlib.sha256(digest_input).hexdigest()
-    raw = f"{user_id}:{hash_hex}"
-    encoded = base64.b64encode(raw.encode()).decode()
-    return {
-        "Authorization": f"Basic {encoded}",
-        "Timestamp": ts,
-        "Content-Type": "application/json",
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# API helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _api(
-    method: str,
-    endpoint: str,
-    payload: Optional[Dict[str, Any]],
-    user_id: str,
-    api_cred: str,
-) -> Dict[str, Any]:
-    url = f"{_QC_API_BASE}/{endpoint.lstrip('/')}"
-    headers = _auth_headers(user_id, api_cred)
-    body = json.dumps(payload).encode() if payload else None
-    req = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        return {"error": f"HTTP {exc.code}: {exc.reason}"}
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        return {"error": str(exc)}
-
-
-def _create_project(name: str, user_id: str, api_cred: str) -> Optional[int]:
-    data = _api("POST", "projects/create", {"name": name, "language": "Py"}, user_id, api_cred)
-    if "error" in data:
-        print(f"  ❌ Create project failed: {data['error']}")
-        return None
-    project_id = data.get("projects", [{}])[0].get("projectId")
-    return project_id
-
-
-def _upload_file(
-    project_id: int,
-    filename: str,
-    content: str,
-    user_id: str,
-    api_cred: str,
-) -> bool:
-    data = _api(
-        "POST",
-        "files/create",
-        {"projectId": project_id, "name": filename, "content": content},
-        user_id,
-        api_cred,
-    )
-    if "error" in data:
-        print(f"  ❌ Upload failed: {data['error']}")
-        return False
-    return True
-
-
-def _compile_project(project_id: int, user_id: str, api_cred: str) -> Optional[str]:
-    data = _api("POST", "compile/create", {"projectId": project_id}, user_id, api_cred)
-    if "error" in data:
-        print(f"  ❌ Compile failed: {data['error']}")
-        return None
-    return data.get("compileId")
-
-
-def _launch_backtest(project_id: int, compile_id: str, user_id: str, api_cred: str) -> Optional[str]:
-    data = _api(
-        "POST",
-        "backtests/create",
-        {"projectId": project_id, "compileId": compile_id, "backtestName": "niblit-initial"},
-        user_id,
-        api_cred,
-    )
-    if "error" in data:
-        print(f"  ❌ Backtest launch failed: {data['error']}")
-        return None
-    return data.get("backtestId")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,10 +68,9 @@ def discover_algorithms(prefix_filter: Optional[str] = None) -> List[tuple[str, 
 
 
 def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
+    client: QCClient,
     algo_name: str,
     main_py: Path,
-    user_id: str,
-    api_cred: str,
     dry_run: bool,
     run_backtest: bool,
 ) -> Dict[str, Any]:
@@ -202,26 +88,31 @@ def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
 
     # 1. Create project
     print("   Creating project…", end=" ", flush=True)
-    project_id = _create_project(qc_name, user_id, api_cred)
-    if project_id is None:
+    project_data = client.create_project(qc_name)
+    project_id = project_data.get("projectId")
+    if not project_id:
+        print(f"❌ Create project failed: {project_data}")
         return {"algo": algo_name, "status": "failed", "step": "create"}
     print(f"✅ projectId={project_id}")
 
     # 2. Upload main.py
     print("   Uploading main.py…", end=" ", flush=True)
-    ok = _upload_file(project_id, "main.py", content, user_id, api_cred)
-    if not ok:
+    upload_result = client.create_file(project_id, "main.py", content)
+    if upload_result.get("success") is False or "error" in upload_result:
+        print(f"❌ Upload failed: {upload_result}")
         return {"algo": algo_name, "status": "failed", "step": "upload"}
     print("✅")
 
     # 3. Compile
     print("   Compiling…", end=" ", flush=True)
-    compile_id = _compile_project(project_id, user_id, api_cred)
-    if compile_id is None:
+    compile_data = client.compile(project_id)
+    compile_id = compile_data.get("compileId")
+    if not compile_id:
+        print(f"❌ Compile failed: {compile_data}")
         return {"algo": algo_name, "status": "failed", "step": "compile"}
     print(f"✅ compileId={compile_id}")
 
-    result = {
+    result: Dict[str, Any] = {
         "algo": algo_name,
         "status": "deployed",
         "project_id": project_id,
@@ -232,10 +123,13 @@ def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
     # 4. Optional backtest
     if run_backtest:
         print("   Launching backtest…", end=" ", flush=True)
-        bt_id = _launch_backtest(project_id, compile_id, user_id, api_cred)
+        bt_data = client.create_backtest(project_id, compile_id, "niblit-initial")
+        bt_id = bt_data.get("backtestId")
         if bt_id:
             print(f"✅ backtestId={bt_id}")
             result["backtest_id"] = bt_id
+        else:
+            print(f"⚠  {bt_data}")
         # Small delay between backtests to avoid rate limits
         time.sleep(2)
 
@@ -250,12 +144,12 @@ def main() -> None:
     parser.add_argument("--save-ids",  default="deployed_projects.json", help="Save project IDs to this file")
     args = parser.parse_args()
 
-    user_id, api_cred = _load_credentials()
-    if not user_id or not api_cred:
-        print("❌ QC_USER_ID and QC_API_CRED must be set.")
-        print("   Set as environment variables or in niblit_params.json.")
+    try:
+        client = QCClient()
+    except ValueError as exc:
+        print(f"❌ {exc}")
         sys.exit(1)
-    print(f"✅ Credentials loaded (user_id={user_id[:4]}...)")
+    print(f"✅ Credentials loaded (user_id={client.user_id_prefix}…)")
 
     algos = discover_algorithms(args.algo)
     if not algos:
@@ -269,10 +163,9 @@ def main() -> None:
     results = []
     for algo_name, main_py in algos:
         r = deploy_algorithm(
+            client=client,
             algo_name=algo_name,
             main_py=main_py,
-            user_id=user_id,
-            api_cred=api_cred,
             dry_run=args.dry_run,
             run_backtest=args.backtest,
         )
