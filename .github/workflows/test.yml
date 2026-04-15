@@ -100,7 +100,8 @@ jobs:
           for d in algos:
               cfg_path = os.path.join(algos_dir, d, "config.json")
               try:
-                  cfg = json.load(open(cfg_path))
+                  with open(cfg_path) as fh:
+                      cfg = json.load(fh)
                   required = {"algorithm-language", "algorithm-location", "algorithm-type-name"}
                   missing_keys = required - set(cfg.keys())
                   if missing_keys:
