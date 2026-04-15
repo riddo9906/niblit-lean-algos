@@ -19,11 +19,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install requests
+          # No third-party packages needed — download_qc_projects.py uses
+          # the stdlib-only qc_client.py with HMAC-SHA256 auth.
 
       - name: Download QuantConnect cloud projects
         env:
           QC_USER_ID: ${{ secrets.QUANTCONNECT_USER_ID }}
-          QC_API_KEY: ${{ secrets.QUANTCONNECT_API_KEY }}
+          QC_API_CRED: ${{ secrets.QUANTCONNECT_API_CRED }}
         run: |
           python scripts/download_qc_projects.py
