@@ -1,0 +1,68 @@
+name: Backtest Algorithms on QuantConnect Cloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      algo:
+        description: 'Algorithm prefix to backtest (e.g. 01, 07). Leave empty to backtest all deployed.'
+        required: false
+        default: ''
+      project_id:
+        description: 'Single project ID to backtest (overrides algo prefix)'
+        required: false
+        default: ''
+      wait:
+        description: 'Poll until backtest completes before finishing'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  backtest:
+    name: Run QuantConnect Backtests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download deployed_projects.json artifact (if available)
+        uses: actions/download-artifact@v4
+        with:
+          name: deployed-project-ids
+          path: .
+        continue-on-error: true
+
+      - name: Run backtests
+        env:
+          QC_USER_ID: ${{ secrets.QUANTCONNECT_USER_ID }}
+          QC_API_CRED: ${{ secrets.QUANTCONNECT_API_CRED }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.project_id }}" ]; then
+            ARGS="$ARGS --project-id ${{ inputs.project_id }}"
+          elif [ -n "${{ inputs.algo }}" ]; then
+            ARGS="$ARGS --algo ${{ inputs.algo }}"
+          fi
+          if [ "${{ inputs.wait }}" = "true" ]; then
+            ARGS="$ARGS --wait"
+          fi
+          python scripts/backtest_all.py $ARGS
+
+      - name: Upload backtest results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: backtest_results.json
+          if-no-files-found: ignore
+          retention-days: 90

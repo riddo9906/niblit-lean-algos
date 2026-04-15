@@ -7,7 +7,7 @@
     "environment": "backtesting",
     "data-folder": "./data",
     "cache-location": "./cache",
-    "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
+    "data-provider": "QuantConnect.Lean.Engine.DataFeeds.ApiDataProvider",
     "map-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider",
     "factor-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider",
     "log-handler": "QuantConnect.Logging.CompositeLogHandler",
@@ -15,6 +15,10 @@
     "job-queue-handler": "QuantConnect.Queues.JobQueue",
     "api-handler": "QuantConnect.Api.Api",
     "research-notebook": "./Research.ipynb",
+    "python-additional-paths": [],
     "lean-config-manager-extra-files": [],
-    "modules": []
+    "modules": [],
+    "debug-mode": false,
+    "log-level": "trace",
+    "results-destination-folder": "./backtests"
 }

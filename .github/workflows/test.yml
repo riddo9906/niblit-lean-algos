@@ -79,7 +79,7 @@ jobs:
       - name: Verify algorithm directory structure
         run: |
           python - <<'EOF'
-          import os, sys
+          import json, os, sys
           algos_dir = "algorithms"
           if not os.path.isdir(algos_dir):
               print(f"algorithms/ directory not found")
@@ -90,4 +90,26 @@ jobs:
               print(f"Algorithms missing main.py: {missing_main}")
               sys.exit(1)
           print(f"All {len(algos)} algorithms have main.py")
+
+          # Validate per-algorithm config.json files
+          missing_cfg = [d for d in algos if not os.path.isfile(os.path.join(algos_dir, d, "config.json"))]
+          if missing_cfg:
+              print(f"Algorithms missing config.json: {missing_cfg}")
+              sys.exit(1)
+          cfg_errors = []
+          for d in algos:
+              cfg_path = os.path.join(algos_dir, d, "config.json")
+              try:
+                  cfg = json.load(open(cfg_path))
+                  required = {"algorithm-language", "algorithm-location", "algorithm-type-name"}
+                  missing_keys = required - set(cfg.keys())
+                  if missing_keys:
+                      cfg_errors.append(f"{cfg_path}: missing keys {missing_keys}")
+              except (json.JSONDecodeError, OSError) as e:
+                  cfg_errors.append(f"{cfg_path}: {e}")
+          if cfg_errors:
+              for e in cfg_errors:
+                  print(e)
+              sys.exit(1)
+          print(f"All {len(algos)} algorithms have valid config.json")
           EOF

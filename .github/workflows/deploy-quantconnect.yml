@@ -1,0 +1,64 @@
+name: Deploy Algorithms to QuantConnect Cloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      algo:
+        description: 'Algorithm prefix to deploy (e.g. 01, 07). Leave empty to deploy all.'
+        required: false
+        default: ''
+      backtest:
+        description: 'Launch an initial backtest after deploying'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run — print plan without making changes'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    name: Deploy to QuantConnect Cloud
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Deploy algorithms
+        env:
+          QC_USER_ID: ${{ secrets.QUANTCONNECT_USER_ID }}
+          QC_API_CRED: ${{ secrets.QUANTCONNECT_API_CRED }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.algo }}" ]; then
+            ARGS="$ARGS --algo ${{ inputs.algo }}"
+          fi
+          if [ "${{ inputs.backtest }}" = "true" ]; then
+            ARGS="$ARGS --backtest"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python scripts/deploy_all_to_qc.py $ARGS
+
+      - name: Upload deployed_projects.json as artifact
+        if: ${{ inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-project-ids
+          path: deployed_projects.json
+          if-no-files-found: ignore
+          retention-days: 90
