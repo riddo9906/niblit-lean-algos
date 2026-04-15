@@ -5,7 +5,8 @@
 numpy>=1.24
 pandas>=2.0
 
-# HTTP (used by deploy scripts)
+# HTTP — used by nibblebot scripts and legacy helpers.
+# NOTE: scripts/qc_client.py and all QC REST API scripts use stdlib urllib only.
 requests>=2.28
 
 # For local development only

@@ -47,7 +47,14 @@ jobs:
 
       - name: Syntax check — scripts
         run: |
+          python -m py_compile scripts/qc_client.py
           python -m py_compile scripts/deploy_all_to_qc.py
+          python -m py_compile scripts/download_qc_projects.py
+          python -m py_compile scripts/update_project.py
+          python -m py_compile scripts/live_trading.py
+          python -m py_compile scripts/backtest_all.py
+          python -m py_compile scripts/list_projects.py
+          python -m py_compile scripts/sync_signal.py
 
       - name: Syntax check — all algorithm main.py files
         run: |

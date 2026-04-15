@@ -1,112 +1,141 @@
+#!/usr/bin/env python3
+"""
+scripts/download_qc_projects.py — Download all QuantConnect Cloud projects
+to a local ``quantconnect-projects/`` directory.
+
+Uses the shared QCClient (HMAC-SHA256 auth) from qc_client.py.
+
+Usage
+-----
+    python scripts/download_qc_projects.py
+    python scripts/download_qc_projects.py --output ./my-qc-backup
+    python scripts/download_qc_projects.py --project-id 12345678
+
+Environment variables required:
+    QC_USER_ID   — QuantConnect numeric user ID
+    QC_API_CRED  — QuantConnect API token
+"""
+
+from __future__ import annotations
+
+import argparse
 import os
 import sys
-import pathlib
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-import requests
-
-# Adjust these based on the exact URLs and JSON from your QC API docs:
-BASE_URL = "https://www.quantconnect.com/api/v2"  # change if docs show v3, etc.
-
-AUTH_AS_QUERY_PARAMS = True  # set False if QC docs say "use basic auth"
-
-USER_ID_PARAM_NAME = "userId"
-API_KEY_PARAM_NAME = "apiToken"
-
-LIST_PROJECTS_PATH = "projects/read"
-LIST_PROJECT_FILES_PATH = "projects/read"
-
-PROJECTS_ARRAY_KEY = "projects"
-PROJECT_ID_KEY = "projectId"
-PROJECT_NAME_KEY = "name"
-
-FILES_ARRAY_KEY = "files"
-FILE_PATH_KEY = "path"
-FILE_CONTENT_KEY = "content"
+# Allow running as `python scripts/download_qc_projects.py` from repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qc_client import QCClient  # noqa: E402
 
 
-def get_env_or_fail(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        print(f"Missing required environment variable: {name}", file=sys.stderr)
-        sys.exit(1)
-    return value
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def qc_request(method: str, path: str, user_id: str, api_key: str, *, params=None) -> Any:
-    if params is None:
-        params = {}
-
-    url = f"{BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-
-    if AUTH_AS_QUERY_PARAMS:
-        params = {**params, USER_ID_PARAM_NAME: user_id, API_KEY_PARAM_NAME: api_key}
-        auth = None
-    else:
-        auth = (user_id, api_key)
-
-    print(f"[QC REQUEST] {method} {url} params={params}")
-    resp = requests.request(method, url, params=params, auth=auth)
-    if not resp.ok:
-        print(f"[QC ERROR] Status {resp.status_code}: {resp.text}", file=sys.stderr)
-        resp.raise_for_status()
-    return resp.json()
-
-
-def list_projects(user_id: str, api_key: str) -> List[Dict[str, Any]]:
-    data = qc_request("GET", LIST_PROJECTS_PATH, user_id, api_key)
-    projects = data.get(PROJECTS_ARRAY_KEY, [])
-    print(f"Found {len(projects)} projects.")
-    return projects
-
-
-def get_project_files(user_id: str, api_key: str, project_id: Any) -> List[Dict[str, Any]]:
-    params = {"projectId": project_id}
-    data = qc_request("GET", LIST_PROJECT_FILES_PATH, user_id, api_key, params=params)
-    files = data.get(FILES_ARRAY_KEY, [])
-    print(f"  Found {len(files)} files for project {project_id}")
-    return files
-
-
-def write_project_files(project_name: str, files: List[Dict[str, Any]]) -> None:
-    base_dir = pathlib.Path("quantconnect-projects") / str(project_name)
-    base_dir.mkdir(parents=True, exist_ok=True)
-
+def write_project_files(
+    base_dir: Path,
+    project_name: str,
+    files: List[Dict[str, Any]],
+) -> int:
+    """Write a project's files to ``base_dir/<project_name>/``."""
+    project_dir = base_dir / project_name
+    project_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
     for f in files:
-        rel_path = f.get(FILE_PATH_KEY) or f.get("name") or "unnamed"
-        content = f.get(FILE_CONTENT_KEY, "")
-
-        dest = base_dir / rel_path
+        rel_path = f.get("name") or f.get("path") or "unnamed.py"
+        content  = f.get("content", "")
+        dest = project_dir / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         print(f"    Wrote {dest}")
+        written += 1
+    return written
 
 
-def main():
-    user_id = get_env_or_fail("QC_USER_ID")
-    api_key = get_env_or_fail("QC_API_KEY")
+def download_project(
+    client: QCClient,
+    project_id: int,
+    project_name: str,
+    output_dir: Path,
+) -> bool:
+    """Download all files for one project. Returns True on success."""
+    print(f"  Fetching files for '{project_name}' (id={project_id})…", end=" ", flush=True)
+    files = client.read_files(project_id)
+    if not files and isinstance(files, list):
+        print("0 files (empty project)")
+        return True
+    count = write_project_files(output_dir, project_name, files)
+    print(f"✅  {count} file(s) written")
+    return True
 
-    print("Using QuantConnect credentials from Actions secrets")
-    print(f"User ID: {user_id}")
 
-    projects = list_projects(user_id, api_key)
-    if not projects:
-        print("No cloud projects returned by QuantConnect API.")
-        return
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
 
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Download QuantConnect Cloud projects to a local directory"
+    )
+    parser.add_argument(
+        "--output", default="quantconnect-projects",
+        help="Local directory to write downloaded projects (default: quantconnect-projects/)"
+    )
+    parser.add_argument(
+        "--project-id", type=int, default=None,
+        help="Download only this single project ID (omit to download all)"
+    )
+    parser.add_argument(
+        "--prefix", default=None,
+        help="Only download projects whose name starts with this string"
+    )
+    args = parser.parse_args()
+
+    try:
+        client = QCClient()
+    except ValueError as exc:
+        print(f"❌ {exc}")
+        print("   Set QC_USER_ID and QC_API_CRED as environment variables.")
+        sys.exit(1)
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"✅ Output directory: {output_dir.resolve()}")
+
+    # ── Resolve project list ───────────────────────────────────────────────
+    if args.project_id:
+        project_data = client.read_project(args.project_id)
+        projects: List[Dict[str, Any]] = project_data.get("projects", [])
+        if not projects:
+            print(f"❌ Could not read project {args.project_id}: {project_data}")
+            sys.exit(1)
+    else:
+        print("Listing all projects…")
+        projects = client.list_projects()
+        if not projects:
+            print("No projects found on QuantConnect Cloud.")
+            sys.exit(0)
+        if args.prefix:
+            projects = [p for p in projects if p.get("name", "").startswith(args.prefix)]
+        print(f"Found {len(projects)} project(s) to download.\n")
+
+    # ── Download each project ──────────────────────────────────────────────
+    success_count = 0
     for proj in projects:
-        project_id = proj.get(PROJECT_ID_KEY) or proj.get("id")
-        project_name = proj.get(PROJECT_NAME_KEY) or f"project_{project_id}"
+        project_id: Optional[int] = proj.get("projectId") or proj.get("id")
+        project_name: str = proj.get("name") or f"project_{project_id}"
 
         if project_id is None:
-            print(f"Skipping project with missing ID: {proj}", file=sys.stderr)
+            print(f"⚠  Skipping project with missing ID: {proj}", file=sys.stderr)
             continue
 
-        print(f"Downloading project '{project_name}' (id={project_id})")
-        files = get_project_files(user_id, api_key, project_id)
-        write_project_files(project_name, files)
+        ok = download_project(client, int(project_id), project_name, output_dir)
+        if ok:
+            success_count += 1
 
-    print("Finished syncing QuantConnect cloud projects.")
+    print(f"\n{'='*50}")
+    print(f"Downloaded {success_count}/{len(projects)} project(s) → {output_dir.resolve()}")
 
 
 if __name__ == "__main__":
