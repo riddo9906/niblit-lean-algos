@@ -42,6 +42,47 @@ from typing import Any, Dict, List, Optional
 import urllib.error
 import urllib.request
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# .env loader  (python-dotenv when available, plain parser otherwise)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_dotenv(env_file: Path) -> None:
+    """Load *env_file* into ``os.environ`` without overwriting existing vars.
+
+    Uses ``python-dotenv`` when installed; falls back to a minimal built-in
+    parser that handles the common ``KEY=VALUE`` format (strips quotes and
+    inline comments).
+    """
+    if not env_file.exists():
+        return
+    try:
+        from dotenv import load_dotenv  # type: ignore[import]
+        load_dotenv(dotenv_path=env_file, override=False)
+        return
+    except ImportError:
+        pass
+
+    # Minimal fallback parser (handles KEY=VALUE, KEY="VALUE", KEY='VALUE')
+    import re
+    _line_re = re.compile(
+        r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\r\n]*))\s*$"""
+    )
+    try:
+        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = _line_re.match(line)
+            if m:
+                key = m.group(1)
+                value = (m.group(2) or m.group(3) or m.group(4) or "").strip()
+                # Never overwrite a value that is already set in the environment
+                if key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,23 +100,33 @@ _DEFAULT_TIMEOUT = 30
 def load_credentials(
     niblit_params_file: Optional[Path] = None,
 ) -> tuple[str, str]:
-    """Return ``(user_id, api_token)`` from env vars or niblit_params.json.
+    """Return ``(user_id, api_token)`` from env vars, ``.env``, or niblit_params.json.
 
     Resolution order (first non-empty value wins):
-    1. ``QC_USER_ID`` / ``QC_API_CRED`` environment variables.
-    2. ``niblit_params.json`` in the Niblit root directory (sibling of this
+    1. ``QC_USER_ID`` / ``QC_API_CRED`` environment variables (e.g. GitHub
+       Actions secrets set in the repository *Settings → Secrets* section).
+    2. ``.env`` file in the repository root (for local development; **never
+       commit this file** — it is already listed in ``.gitignore``).
+       Copy ``.env.example`` to ``.env`` and fill in your values.
+    3. ``niblit_params.json`` in the Niblit root directory (sibling of this
        repo when checked out next to the main Niblit project).
 
     Raises
     ------
     ValueError
-        When credentials cannot be found in either source.
+        When credentials cannot be found in any of the above sources.
     """
+    # Step 2 — load .env from the repo root so env vars are populated before
+    # we read them below.  Existing environment variables are NOT overwritten,
+    # so GitHub Actions secrets always take precedence over a local .env file.
+    _repo_root = Path(__file__).resolve().parent.parent
+    _load_dotenv(_repo_root / ".env")
+
     user_id  = os.environ.get("QC_USER_ID", "").strip()
     api_cred = os.environ.get("QC_API_CRED", "").strip()
 
     if not user_id or not api_cred:
-        # Try niblit_params.json (Niblit root is the parent of this repo)
+        # Step 3 — Try niblit_params.json (Niblit root is the parent of this repo)
         if niblit_params_file is None:
             niblit_params_file = (
                 Path(__file__).resolve().parent.parent.parent / "niblit_params.json"
@@ -92,7 +143,9 @@ def load_credentials(
         raise ValueError(
             "QuantConnect credentials not found.  "
             "Set QC_USER_ID and QC_API_CRED as environment variables, "
-            "or add them to niblit_params.json in the Niblit root directory."
+            "or add them to niblit_params.json in the Niblit root directory.\n"
+            "For local testing, copy .env.example to .env in the repo root "
+            "and fill in your QC_USER_ID and QC_API_CRED values."
         )
 
     return user_id, api_cred
