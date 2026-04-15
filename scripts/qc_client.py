@@ -10,7 +10,7 @@ Authentication
 QuantConnect uses HMAC-SHA256 Basic auth with a per-request timestamp:
 
     timestamp = str(int(time.time()))
-    hash_hex  = sha256(f"{timestamp}:{api_token}").hexdigest()
+    hash_hex  = sha256(f"{timestamp}{api_token}").hexdigest()
     header    = "Basic " + base64(f"{user_id}:{hash_hex}")
 
 Both the ``Authorization`` header AND a ``Timestamp: <epoch>`` header must
@@ -194,7 +194,7 @@ class QCClient:
         """Build HMAC-SHA256 authentication headers for one request.
 
         QuantConnect's API signing scheme (not password storage):
-            Authorization = "Basic " + base64(user_id + ":" + sha256(timestamp + ":" + api_token))
+            Authorization = "Basic " + base64(user_id + ":" + sha256(timestamp + api_token))
             Timestamp     = <unix epoch seconds>
 
         SHA-256 is used here as a request-signing MAC as specified by the
@@ -202,7 +202,7 @@ class QCClient:
         """
         ts = str(int(time.time()))
         # nosec: SHA-256 used as API request signing per QC spec, not for password storage
-        digest = hashlib.sha256(f"{ts}:{self._api_token}".encode()).hexdigest()  # nosec
+        digest = hashlib.sha256(f"{ts}{self._api_token}".encode()).hexdigest()  # nosec
         encoded = base64.b64encode(f"{self._user_id}:{digest}".encode()).decode()
         return {
             "Authorization": f"Basic {encoded}",
