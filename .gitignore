@@ -1,4 +1,6 @@
+# ─────────────────────────────────────────
 # LEAN workspace + build artefacts
+# ─────────────────────────────────────────
 .lean/
 backtests/
 live/
@@ -10,15 +12,65 @@ __pycache__/
 dist/
 build/
 
-# Environment / credentials — NEVER commit these
+# ─────────────────────────────────────────
+# Environment / credentials — NEVER commit
+# ─────────────────────────────────────────
 .env
 *.env
 niblit_params.json
 niblit_lean_signal.json
 
+# ─────────────────────────────────────────
+# Runtime / AI memory (Niblit)
+# ─────────────────────────────────────────
+data/
+niblit/
+
+# JSON runtime state (NOT configs)
+*_state.json
+*.jsonl
+niblit_*.json
+
+# Pickle / memory graphs
+*.pkl
+
+# Virtual environments
+.venv/
+niblit-env/
+
+# Python deep cache
+**/__pycache__/
+
+# ─────────────────────────────────────────
+# Android / Buildozer
+# ─────────────────────────────────────────
+.buildozer/
+.buildozer/android/platform/python-for-android/
+
+# Build outputs
+*.apk
+*.aab
+*.dex
+
+# ─────────────────────────────────────────
+# Logs / temp
+# ─────────────────────────────────────────
+*.log
+
+# ─────────────────────────────────────────
 # macOS
+# ─────────────────────────────────────────
 .DS_Store
 
+# ─────────────────────────────────────────
 # IDE
+# ─────────────────────────────────────────
 .vscode/
 .idea/
+
+# ─────────────────────────────────────────
+# KEEP IMPORTANT CONFIGS
+# ─────────────────────────────────────────
+!lean.json
+!requirements.txt
+!README.md
