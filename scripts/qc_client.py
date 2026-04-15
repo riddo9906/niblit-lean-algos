@@ -132,10 +132,24 @@ class QCClient:
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 
+    @property
+    def user_id_prefix(self) -> str:
+        """Return the first 4 characters of the user ID for safe logging."""
+        return self._user_id[:4]
+
     def _auth_headers(self) -> Dict[str, str]:
-        """Build HMAC-SHA256 authentication headers for one request."""
+        """Build HMAC-SHA256 authentication headers for one request.
+
+        QuantConnect's API signing scheme (not password storage):
+            Authorization = "Basic " + base64(user_id + ":" + sha256(timestamp + ":" + api_token))
+            Timestamp     = <unix epoch seconds>
+
+        SHA-256 is used here as a request-signing MAC as specified by the
+        QuantConnect API — this is NOT password hashing for storage.
+        """
         ts = str(int(time.time()))
-        digest = hashlib.sha256(f"{ts}:{self._api_token}".encode()).hexdigest()
+        # nosec: SHA-256 used as API request signing per QC spec, not for password storage
+        digest = hashlib.sha256(f"{ts}:{self._api_token}".encode()).hexdigest()  # nosec
         encoded = base64.b64encode(f"{self._user_id}:{digest}".encode()).decode()
         return {
             "Authorization": f"Basic {encoded}",

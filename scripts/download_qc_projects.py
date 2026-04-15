@@ -62,7 +62,10 @@ def download_project(
     """Download all files for one project. Returns True on success."""
     print(f"  Fetching files for '{project_name}' (id={project_id})…", end=" ", flush=True)
     files = client.read_files(project_id)
-    if not files and isinstance(files, list):
+    if not isinstance(files, list):
+        print(f"❌  unexpected response: {files}")
+        return False
+    if not files:
         print("0 files (empty project)")
         return True
     count = write_project_files(output_dir, project_name, files)

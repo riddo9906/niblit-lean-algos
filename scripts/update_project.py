@@ -157,7 +157,7 @@ def main() -> None:
     except ValueError as exc:
         print(f"❌ {exc}")
         sys.exit(1)
-    print(f"✅ Connected (user_id={client._user_id[:4]}…)")
+    print(f"✅ Connected (user_id={client.user_id_prefix}…)")
 
     # ── Resolve which projects to update ──────────────────────────────────
     projects = load_deployed_projects(

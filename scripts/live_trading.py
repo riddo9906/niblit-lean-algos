@@ -262,7 +262,7 @@ def cmd_portfolio(client: QCClient, args: argparse.Namespace) -> None:
             value   = h.get("marketValue", 0)
             unrealised = h.get("unrealizedPnL", 0)
             print(f"    {sym:<12} qty={qty:<12} price={price:<12.4f} "
-                  f"value={value:<12.2f} unrealised_pnl={unrealised:.2f}")
+                  f"value={value:<12.2f} unrealized_pnl={unrealised:.2f}")
     else:
         print("  Holdings: (none)")
 
@@ -412,7 +412,7 @@ def main() -> None:  # pylint: disable=too-many-statements
     except ValueError as exc:
         print(f"❌ {exc}")
         sys.exit(1)
-    print(f"✅ Connected (user_id={client._user_id[:4]}…)")
+    print(f"✅ Connected (user_id={client.user_id_prefix}…)")
 
     dispatch = {
         "start":     cmd_start,
