@@ -176,5 +176,5 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
             }
             with open(_RESULTS_FILE, "w", encoding="utf-8") as fh:
                 json.dump(results, fh, indent=2)
-        except Exception as exc:  # noqa: BLE001
+        except (OSError, ValueError, TypeError) as exc:
             logger.warning("Could not write results file: %s", exc)

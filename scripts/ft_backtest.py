@@ -25,7 +25,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -87,7 +87,7 @@ def main() -> None:
         print(f"ERROR: config not found: {config}", file=sys.stderr)
         sys.exit(1)
 
-    end   = datetime.utcnow()
+    end   = datetime.now(timezone.utc)
     start = end - timedelta(days=args.days)
     timerange = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
 
