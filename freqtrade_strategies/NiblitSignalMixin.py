@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -53,9 +54,10 @@ class NiblitSignalMixin:
         self.niblit_block_entry(pair, direction)  → True = block trade
     """
 
-    # Class-level cache (shared across all instances)
+    # Class-level cache (shared across all instances) — protected by _niblit_lock
     _niblit_last_read: float = 0.0
     _niblit_last_data: Optional[Dict[str, Any]] = None
+    _niblit_lock: threading.Lock = threading.Lock()
 
     # Override in subclass to tune veto logic
     niblit_min_conf: float = _NIBLIT_MIN_CONF
@@ -104,27 +106,28 @@ class NiblitSignalMixin:
 
     def _niblit_read(self) -> Optional[Dict[str, Any]]:
         now = time.time()
-        if now - NiblitSignalMixin._niblit_last_read < 5.0 and \
-                NiblitSignalMixin._niblit_last_data is not None:
-            return NiblitSignalMixin._niblit_last_data
+        with NiblitSignalMixin._niblit_lock:
+            if now - NiblitSignalMixin._niblit_last_read < 5.0 and \
+                    NiblitSignalMixin._niblit_last_data is not None:
+                return NiblitSignalMixin._niblit_last_data
 
-        NiblitSignalMixin._niblit_last_read = now
-        try:
-            path = getattr(self, "niblit_signal_file", _DEFAULT_SIGNAL_FILE)
-            if not os.path.isfile(path):
+            NiblitSignalMixin._niblit_last_read = now
+            try:
+                path = getattr(self, "niblit_signal_file", _DEFAULT_SIGNAL_FILE)
+                if not os.path.isfile(path):
+                    NiblitSignalMixin._niblit_last_data = None
+                    return None
+                with open(path, "r", encoding="utf-8") as fh:
+                    data: Dict[str, Any] = json.load(fh)
+            except (OSError, ValueError, json.JSONDecodeError):
                 NiblitSignalMixin._niblit_last_data = None
                 return None
-            with open(path, "r", encoding="utf-8") as fh:
-                data: Dict[str, Any] = json.load(fh)
-        except (OSError, ValueError, json.JSONDecodeError):
-            NiblitSignalMixin._niblit_last_data = None
-            return None
 
-        ts = data.get("timestamp", 0)
-        max_age = getattr(self, "niblit_max_age", _MAX_SIGNAL_AGE_SECS)
-        if ts and (now - float(ts)) > max_age:
-            NiblitSignalMixin._niblit_last_data = None
-            return None
+            ts = data.get("timestamp", 0)
+            max_age = getattr(self, "niblit_max_age", _MAX_SIGNAL_AGE_SECS)
+            if ts and (now - float(ts)) > max_age:
+                NiblitSignalMixin._niblit_last_data = None
+                return None
 
-        NiblitSignalMixin._niblit_last_data = data
-        return data
+            NiblitSignalMixin._niblit_last_data = data
+            return data

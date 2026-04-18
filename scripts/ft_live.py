@@ -113,10 +113,8 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
-    result = _ft_request("POST", "/forceexit", {"tradeid": "all"})
+    result = _ft_request("POST", "/stop")
     print(json.dumps(result, indent=2))
-    stop = _ft_request("POST", "/stopbuy")
-    print(json.dumps(stop, indent=2))
 
 
 def cmd_status(args: argparse.Namespace) -> None:

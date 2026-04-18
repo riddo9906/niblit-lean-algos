@@ -24,7 +24,6 @@
       "XRP/USDT"
     ],
     "pair_blacklist": [
-      "BNB/.*",
       ".*/BTC"
     ]
   },
