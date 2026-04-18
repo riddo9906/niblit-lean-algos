@@ -73,6 +73,7 @@ def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
     main_py: Path,
     dry_run: bool,
     run_backtest: bool,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     """Deploy a single algorithm. Returns a result dict."""
     qc_name = f"niblit-{algo_name}"
@@ -91,16 +92,22 @@ def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
     project_data = client.create_project(qc_name)
     project_id = project_data.get("projectId")
     if not project_id:
-        print(f"❌ Create project failed: {project_data}")
-        return {"algo": algo_name, "status": "failed", "step": "create"}
+        err = project_data.get("error", project_data.get("errors", project_data))
+        print(f"\n   ❌ Create project failed: {err}")
+        if verbose:
+            print(f"      Raw response: {project_data}")
+        return {"algo": algo_name, "status": "failed", "step": "create", "error": str(err)}
     print(f"✅ projectId={project_id}")
 
     # 2. Upload main.py
     print("   Uploading main.py…", end=" ", flush=True)
     upload_result = client.create_file(project_id, "main.py", content)
     if upload_result.get("success") is False or "error" in upload_result:
-        print(f"❌ Upload failed: {upload_result}")
-        return {"algo": algo_name, "status": "failed", "step": "upload"}
+        err = upload_result.get("error", upload_result)
+        print(f"\n   ❌ Upload failed: {err}")
+        if verbose:
+            print(f"      Raw response: {upload_result}")
+        return {"algo": algo_name, "status": "failed", "step": "upload", "error": str(err)}
     print("✅")
 
     # 3. Compile
@@ -108,8 +115,11 @@ def deploy_algorithm(  # pylint: disable=too-many-positional-arguments
     compile_data = client.compile(project_id)
     compile_id = compile_data.get("compileId")
     if not compile_id:
-        print(f"❌ Compile failed: {compile_data}")
-        return {"algo": algo_name, "status": "failed", "step": "compile"}
+        err = compile_data.get("error", compile_data.get("errors", compile_data))
+        print(f"\n   ❌ Compile failed: {err}")
+        if verbose:
+            print(f"      Raw response: {compile_data}")
+        return {"algo": algo_name, "status": "failed", "step": "compile", "error": str(err)}
     print(f"✅ compileId={compile_id}")
 
     result: Dict[str, Any] = {
@@ -142,6 +152,7 @@ def main() -> None:
     parser.add_argument("--backtest",  action="store_true", help="Launch initial backtest after deploy")
     parser.add_argument("--algo",      default=None, help="Deploy only algorithms starting with this prefix")
     parser.add_argument("--save-ids",  default="deployed_projects.json", help="Save project IDs to this file")
+    parser.add_argument("--verbose",   action="store_true", help="Print raw API responses on failure")
     args = parser.parse_args()
 
     try:
@@ -168,6 +179,7 @@ def main() -> None:
             main_py=main_py,
             dry_run=args.dry_run,
             run_backtest=args.backtest,
+            verbose=args.verbose,
         )
         results.append(r)
         # Rate-limit: 1 project per 3 seconds
@@ -179,6 +191,13 @@ def main() -> None:
     failed   = [r for r in results if r["status"] == "failed"]
     print(f"\n{'='*50}")
     print(f"Deployed: {len(deployed)}  Failed: {len(failed)}  Dry-run: {args.dry_run}")
+
+    if failed:
+        print("\nFailed algorithms:")
+        for r in failed:
+            step = r.get("step", "?")
+            err  = r.get("error", "unknown error")
+            print(f"  ✗ {r['algo']}  (step={step})  {err}")
 
     if deployed and not args.dry_run:
         out_file = _REPO_ROOT / args.save_ids
