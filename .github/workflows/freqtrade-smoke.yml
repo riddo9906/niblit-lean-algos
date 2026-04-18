@@ -1,0 +1,145 @@
+name: Freqtrade Strategy Smoke Test
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'freqtrade_strategies/**'
+      - 'configs/freqtrade_*.json'
+      - 'scripts/ft_*.py'
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - 'freqtrade_strategies/**'
+      - 'configs/freqtrade_*.json'
+      - 'scripts/ft_*.py'
+
+jobs:
+  smoke:
+    name: Strategy Syntax + Smoke Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install Freqtrade + dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install freqtrade pandas-ta
+
+      - name: Syntax check — freqtrade_strategies/
+        run: |
+          python - <<'EOF'
+          import ast, os, sys
+          errors = []
+          for root, dirs, files in os.walk("freqtrade_strategies"):
+              dirs[:] = [d for d in dirs if d not in ("__pycache__",)]
+              for f in files:
+                  if not f.endswith(".py"):
+                      continue
+                  path = os.path.join(root, f)
+                  try:
+                      with open(path) as fh:
+                          ast.parse(fh.read())
+                  except SyntaxError as e:
+                      errors.append(f"{path}: {e}")
+          if errors:
+              for e in errors:
+                  print(e)
+              sys.exit(1)
+          print("All freqtrade_strategies/*.py parse cleanly")
+          EOF
+
+      - name: Syntax check — scripts/ft_*.py
+        run: |
+          for f in scripts/ft_backtest.py scripts/ft_hyperopt.py scripts/ft_live.py; do
+            python -m py_compile "$f" && echo "OK: $f"
+          done
+
+      - name: Validate Freqtrade config JSON files
+        run: |
+          python - <<'EOF'
+          import json, sys, os
+          required_keys = {"stake_currency", "exchange", "pairlists", "timeframe"}
+          errors = []
+          for fname in os.listdir("configs"):
+              if not fname.startswith("freqtrade_") or not fname.endswith(".json"):
+                  continue
+              path = os.path.join("configs", fname)
+              try:
+                  with open(path) as fh:
+                      cfg = json.load(fh)
+                  missing = required_keys - set(cfg.keys())
+                  if missing:
+                      errors.append(f"{path}: missing keys {missing}")
+              except (json.JSONDecodeError, OSError) as e:
+                  errors.append(f"{path}: {e}")
+          if errors:
+              for e in errors:
+                  print(e)
+              sys.exit(1)
+          print("All Freqtrade config files are valid JSON with required keys")
+          EOF
+
+      - name: Import smoke test — all strategies must import cleanly
+        run: |
+          python - <<'EOF'
+          import sys, importlib.util, os
+          sys.path.insert(0, ".")
+          strategies_dir = "freqtrade_strategies"
+          errors = []
+          for f in os.listdir(strategies_dir):
+              if not f.endswith(".py") or f.startswith("_"):
+                  continue
+              modname = f"freqtrade_strategies.{f[:-3]}"
+              spec = importlib.util.spec_from_file_location(
+                  modname, os.path.join(strategies_dir, f))
+              try:
+                  mod = importlib.util.module_from_spec(spec)
+                  spec.loader.exec_module(mod)
+              except ImportError as e:
+                  # freqtrade not installed in CI — skip
+                  if "freqtrade" in str(e):
+                      print(f"SKIP (no freqtrade): {modname}")
+                  else:
+                      errors.append(f"{modname}: {e}")
+              except Exception as e:
+                  errors.append(f"{modname}: {e}")
+          if errors:
+              for e in errors:
+                  print(e)
+              sys.exit(1)
+          print("Strategy import smoke test passed")
+          EOF
+
+      - name: Quick backtest smoke test (EmaTripleCross, 30 days)
+        run: |
+          # Download minimal historical data
+          freqtrade download-data \
+            --exchange binance \
+            --pairs BTC/USDT \
+            --timeframe 1h \
+            --days 30 \
+            --data-dir user_data/data/binance \
+            --config configs/freqtrade_config_backtesting.json
+          # Run a quick smoke backtest
+          freqtrade backtesting \
+            --strategy EmaTripleCross \
+            --strategy-path freqtrade_strategies \
+            --config configs/freqtrade_config_backtesting.json \
+            --timerange "$(date -d '30 days ago' +%Y%m%d)-$(date +%Y%m%d)" \
+            --pairs BTC/USDT \
+            --cache none

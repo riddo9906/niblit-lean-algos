@@ -1,0 +1,72 @@
+name: Freqtrade Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: 'Strategy to backtest (e.g. EmaTripleCross). Leave empty to backtest all.'
+        required: false
+        default: ''
+      days:
+        description: 'Backtest period in days'
+        required: false
+        default: '180'
+      pairs:
+        description: 'Space-separated pairs e.g. "BTC/USDT ETH/USDT"'
+        required: false
+        default: ''
+
+jobs:
+  backtest:
+    name: Freqtrade Backtest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install Freqtrade
+        run: |
+          python -m pip install --upgrade pip
+          pip install freqtrade pandas-ta
+
+      - name: Download historical data (Binance, no keys needed)
+        run: |
+          PAIRS="${{ inputs.pairs }}"
+          if [ -z "$PAIRS" ]; then
+            PAIRS="BTC/USDT ETH/USDT SOL/USDT"
+          fi
+          freqtrade download-data \
+            --exchange binance \
+            --pairs $PAIRS \
+            --timeframe 1h \
+            --days ${{ inputs.days || 180 }} \
+            --data-dir user_data/data/binance \
+            --config configs/freqtrade_config_backtesting.json
+
+      - name: Run backtests
+        run: |
+          ARGS="--days ${{ inputs.days || 180 }}"
+          if [ -n "${{ inputs.strategy }}" ]; then
+            ARGS="$ARGS --strategy ${{ inputs.strategy }}"
+          fi
+          if [ -n "${{ inputs.pairs }}" ]; then
+            ARGS="$ARGS --pairs ${{ inputs.pairs }}"
+          fi
+          python scripts/ft_backtest.py $ARGS
+
+      - name: Upload backtest results
+        uses: actions/upload-artifact@v4
+        with:
+          name: freqtrade-backtest-results
+          path: backtest_results/
+          if-no-files-found: ignore
+          retention-days: 90

@@ -77,3 +77,29 @@ jobs:
           algo_count = len([d for d in os.listdir(algos_dir) if os.path.isfile(os.path.join(algos_dir, d, "main.py"))])
           print(f"All {algo_count} algorithm files parse cleanly")
           EOF
+
+      - name: Syntax check — freqtrade_strategies/
+        run: |
+          python - <<'EOF'
+          import ast, os, sys
+          errors = []
+          strategies_dir = "freqtrade_strategies"
+          if not os.path.isdir(strategies_dir):
+              print("freqtrade_strategies/ not found — skipping")
+              sys.exit(0)
+          for f in sorted(os.listdir(strategies_dir)):
+              if not f.endswith(".py"):
+                  continue
+              path = os.path.join(strategies_dir, f)
+              try:
+                  with open(path) as fh:
+                      ast.parse(fh.read())
+              except SyntaxError as e:
+                  errors.append(f"{path}: {e}")
+          if errors:
+              for e in errors:
+                  print(e)
+              sys.exit(1)
+          count = len([f for f in os.listdir(strategies_dir) if f.endswith(".py")])
+          print(f"All {count} freqtrade_strategies/*.py parse cleanly")
+          EOF
