@@ -6,9 +6,10 @@
 #   pip install freqtrade
 #   OR: git clone https://github.com/freqtrade/freqtrade && ./setup.sh -i
 # Required additional package for technical indicators:
-# pip install pandas-ta
+# NOTE: pandas-ta was removed from PyPI — install from GitHub source:
+#   pip install "git+https://github.com/twopirllc/pandas-ta.git"
 # freqtrade  # managed externally
-# pandas-ta  # managed externally
+# pandas-ta  # install from GitHub — see note above
 
 # Data + numerics (optional — pure-Python fallbacks exist in all algorithms)
 numpy>=1.24
