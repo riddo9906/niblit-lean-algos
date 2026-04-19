@@ -1,6 +1,16 @@
 # Core LEAN / QuantConnect (managed by QuantConnect cloud — not pip installable)
 # lean  # install via: pip install lean
 
+# ── Freqtrade (primary trading platform) ──────────────────────────────────────
+# Install Freqtrade separately following the official docs:
+#   pip install freqtrade
+#   OR: git clone https://github.com/freqtrade/freqtrade && ./setup.sh -i
+# Required additional package for technical indicators:
+# NOTE: pandas-ta was removed from PyPI — install from GitHub source:
+#   pip install "git+https://github.com/twopirllc/pandas-ta.git"
+# freqtrade  # managed externally
+# pandas-ta  # install from GitHub — see note above
+
 # Data + numerics (optional — pure-Python fallbacks exist in all algorithms)
 numpy>=1.24
 pandas>=2.0
