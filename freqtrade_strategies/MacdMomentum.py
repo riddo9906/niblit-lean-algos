@@ -15,7 +15,10 @@ import pandas as pd
 import pandas_ta as ta  # type: ignore
 from freqtrade.strategy import IStrategy, IntParameter
 
-from freqtrade_strategies.NiblitSignalMixin import NiblitSignalMixin
+try:
+    from .NiblitSignalMixin import NiblitSignalMixin
+except ImportError:
+    from NiblitSignalMixin import NiblitSignalMixin
 
 
 class MacdMomentum(NiblitSignalMixin, IStrategy):
