@@ -13,7 +13,7 @@ import pandas as pd
 import pandas_ta as ta  # type: ignore
 from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
 
-from freqtrade_strategies.NiblitSignalMixin import NiblitSignalMixin
+from NiblitSignalMixin import NiblitSignalMixin
 
 
 class SupertrendAtr(NiblitSignalMixin, IStrategy):

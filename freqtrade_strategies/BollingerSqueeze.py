@@ -16,7 +16,7 @@ import pandas as pd
 import pandas_ta as ta  # type: ignore
 from freqtrade.strategy import IStrategy, DecimalParameter
 
-from freqtrade_strategies.NiblitSignalMixin import NiblitSignalMixin
+from NiblitSignalMixin import NiblitSignalMixin
 
 
 class BollingerSqueeze(NiblitSignalMixin, IStrategy):
