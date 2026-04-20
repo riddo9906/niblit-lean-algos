@@ -24,7 +24,7 @@ class EmaTripleCross(NiblitSignalMixin, IStrategy):
 
     INTERFACE_VERSION = 3
     timeframe = "1h"
-    can_short = True
+    can_short = False
 
     minimal_roi = {"120": 0.03, "60": 0.05, "0": 0.10}
     stoploss = -0.03

@@ -24,7 +24,7 @@ class RsiMeanReversion(NiblitSignalMixin, IStrategy):
 
     INTERFACE_VERSION = 3
     timeframe = "1h"
-    can_short = True
+    can_short = False
 
     minimal_roi = {"0": 0.08}
     stoploss = -0.03

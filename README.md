@@ -84,7 +84,7 @@ niblit-lean-algos/
 ### 1. Install Freqtrade
 
 ```bash
-pip install freqtrade pandas-ta
+pip install freqtrade
 # or full install:
 git clone https://github.com/freqtrade/freqtrade
 cd freqtrade && ./setup.sh -i
