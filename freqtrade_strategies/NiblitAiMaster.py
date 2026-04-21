@@ -214,7 +214,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                     current_rate: float, current_profit: float,
                     **kwargs) -> Optional[str]:
         """Regime-based force-exit and profit-protection early exit."""
-        is_long = not getattr(trade, "is_short", True)
+        is_long = not getattr(trade, "is_short", False)
 
         # Force-exit on dangerous regime (live only; no-op in backtesting)
         regime = self.niblit_regime()
@@ -237,7 +237,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                             pair, current_profit * 100,
                         )
                         return "profit_protect"
-            except Exception:  # noqa: BLE001
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError):
                 pass
 
         return None
