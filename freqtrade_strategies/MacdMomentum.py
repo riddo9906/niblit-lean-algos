@@ -3,9 +3,7 @@ MACD Momentum — Freqtrade strategy.
 
 Entry (long):  MACD histogram crosses from negative to positive AND
                price > SMA200 (bull-regime filter).
-Entry (short): MACD histogram crosses from positive to negative AND
-               price < SMA200.
-Exit:          Opposite histogram cross OR minimal_roi OR stoploss.
+Exit:          Histogram crosses back negative OR minimal_roi OR stoploss.
 Niblit:        Blocks entry when AI signal contradicts direction.
 Timeframe:     1h (crypto, Binance).
 """
@@ -59,14 +57,6 @@ class MacdMomentum(NiblitSignalMixin, IStrategy):
             "enter_long"
         ] = 1
 
-        dataframe.loc[
-            (dataframe["macd_hist"] < 0) &
-            (dataframe["macd_hist"].shift(1) >= 0) &
-            (dataframe["close"] < dataframe["sma200"]) &
-            (dataframe["volume"] > 0),
-            "enter_short"
-        ] = 1
-
         return dataframe
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -74,12 +64,6 @@ class MacdMomentum(NiblitSignalMixin, IStrategy):
             (dataframe["macd_hist"] < 0) &
             (dataframe["macd_hist"].shift(1) >= 0),
             "exit_long"
-        ] = 1
-
-        dataframe.loc[
-            (dataframe["macd_hist"] > 0) &
-            (dataframe["macd_hist"].shift(1) <= 0),
-            "exit_short"
         ] = 1
 
         return dataframe
