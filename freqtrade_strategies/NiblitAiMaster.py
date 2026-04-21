@@ -1,17 +1,26 @@
 """
 Niblit AI Master — Freqtrade flagship strategy.
 
-Combines Niblit AI signal (70% weight) with internal EMA9/21 + RSI14
-fallback signal (30% weight) — matching the logic in the LEAN master.
+Entry logic (all must align for a long):
+  1. Long-term trend:   close > EMA200     (macro bull filter)
+  2. Medium trend:      close > EMA50      (intermediate trend)
+  3. Short-term signal: EMA9 > EMA21       (fast crossover)
+  4. Momentum gate:     ADX > adx_threshold (trending, not choppy)
+  5. RSI range:         rsi_buy_min < RSI < rsi_buy_max (not oversold/overbought)
+  6. Volume:            volume > 0
 
-• In live/dry-run: reads NiblitBridge JSON signal in confirm_trade_entry()
-  and confirm_trade_exit().
-• In backtesting:  Niblit weight falls back to zero gracefully; the strategy
-  trades on internal signals only.
+Exit signals:
+  - EMA9 crosses below EMA21 AND close drops below EMA50  (clear reversal)
+  - RSI > rsi_overbought                                  (momentum exhaustion)
 
-Regime handling:
-  - "ranging" / "sideways" → position size halved via custom_stake_amount()
-  - "volatile" / "crash" / "bear" → entry blocked; any open long is closed
+Custom exits (live + backtest):
+  - Dangerous regime (volatile/crash/bear) → immediate exit
+  - Profit protection: if up >1% and EMA9 turns bearish   → lock in gains
+
+Niblit AI role (live only):
+  - BUY regime with conf>min_conf: AI-vetoed entries are blocked and logged
+  - ranging/sideways regime: position size halved
+  - volatile/crash/bear: entry blocked, open positions force-exited
 
 Timeframe: 1h (crypto, Binance).
 """
@@ -25,7 +34,7 @@ from typing import Optional
 
 import pandas as pd
 import pandas_ta as ta  # type: ignore
-from freqtrade.strategy import IStrategy
+from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
 
 try:
     from .NiblitSignalMixin import NiblitSignalMixin
@@ -50,9 +59,32 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     timeframe = "1h"
     can_short = False
 
-    minimal_roi = {"0": 0.99}  # rely on combined signal exits
-    stoploss = -0.03
-    trailing_stop = False
+    # Staged ROI: take quick profits early, hold winners progressively longer
+    minimal_roi = {"0": 0.05, "30": 0.03, "60": 0.02, "120": 0.01}
+
+    # Tighter hard stop — pairs with -3% losses dominated the bad exits
+    stoploss = -0.015
+
+    # Trail after gains appear so winners don't round-trip to losses
+    trailing_stop = True
+    trailing_stop_positive = 0.01          # activate trailing once up 1%
+    trailing_stop_positive_offset = 0.02   # lock floor at entry+1% when at +2%
+    trailing_only_offset_is_reached = True
+
+    # EMA200 needs 200 candles; set a buffer so indicators are fully warmed
+    startup_candle_count: int = 200
+
+    # ── hyperopt parameters ───────────────────────────────────────────────
+
+    # ADX strength gate — filter out choppy, range-bound markets
+    adx_threshold = IntParameter(15, 35, default=20, space="buy", optimize=True)
+
+    # RSI entry window for longs — avoid both oversold traps and overbought entries
+    rsi_buy_min = IntParameter(30, 50, default=40, space="buy", optimize=True)
+    rsi_buy_max = IntParameter(55, 75, default=65, space="buy", optimize=True)
+
+    # RSI overbought exit level
+    rsi_overbought = IntParameter(70, 85, default=75, space="sell", optimize=True)
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -64,53 +96,69 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     # ── indicators ────────────────────────────────────────────────────────
 
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+        # Short-term trend
         dataframe["ema9"]   = ta.ema(dataframe["close"], length=9)
         dataframe["ema21"]  = ta.ema(dataframe["close"], length=21)
+
+        # Medium-term trend
+        dataframe["ema50"]  = ta.ema(dataframe["close"], length=50)
+
+        # Long-term macro trend filter
+        dataframe["ema200"] = ta.ema(dataframe["close"], length=200)
+
+        # Momentum / oscillator
         dataframe["rsi"]    = ta.rsi(dataframe["close"], length=14)
-        dataframe["sma50"]  = ta.sma(dataframe["close"], length=50)
+
+        # ADX — trend strength gate (avoids choppy, ranging markets)
+        adx_result = ta.adx(dataframe["high"], dataframe["low"], dataframe["close"], length=14)
+        if adx_result is not None and not adx_result.empty:
+            adx_col = [c for c in adx_result.columns if c.upper().startswith("ADX_")]
+            if adx_col:
+                dataframe["adx"] = adx_result[adx_col[0]]
+        if "adx" not in dataframe.columns:
+            dataframe["adx"] = 0.0
+
+        # Volatility — used in custom_exit profit protection
         dataframe["atr"]    = ta.atr(dataframe["high"], dataframe["low"],
                                      dataframe["close"], length=14)
         return dataframe
 
-    # ── signals ───────────────────────────────────────────────────────────
-
-    def _internal_score(self, row: pd.Series) -> float:
-        ema_bull  = row["ema9"]  > row["ema21"]
-        ema_bear  = row["ema9"]  < row["ema21"]
-        rsi_ok    = 30 < row["rsi"] < 70
-        trend_up  = row["close"] > row["sma50"]
-        trend_dn  = row["close"] < row["sma50"]
-
-        if ema_bull and rsi_ok and trend_up:
-            return 1.0
-        if ema_bear and rsi_ok and trend_dn:
-            return -1.0
-        return 0.0
+    # ── entry signals (fully vectorised) ─────────────────────────────────
 
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-        # Vectorised internal signal (Niblit weight is applied in confirm_trade_entry)
-        dataframe["internal_score"] = dataframe.apply(self._internal_score, axis=1)
-        combined = _INTERNAL_WEIGHT * dataframe["internal_score"]
+        # Long-term macro trend (EMA200 filter)
+        macro_bull  = dataframe["close"] > dataframe["ema200"]
+        # Medium trend alignment
+        mid_bull    = dataframe["close"] > dataframe["ema50"]
+        # Short-term EMA crossover
+        ema_bull    = dataframe["ema9"]  > dataframe["ema21"]
+        # Momentum gate — ADX must show a trending market
+        adx_ok      = dataframe["adx"]   > self.adx_threshold.value
+        # RSI in healthy buy zone — not a blind oversold bounce
+        rsi_in_zone = (
+            (dataframe["rsi"] > self.rsi_buy_min.value) &
+            (dataframe["rsi"] < self.rsi_buy_max.value)
+        )
+        vol_ok      = dataframe["volume"] > 0
 
         dataframe.loc[
-            (combined > 0.06) &  # 30% weight × 0.20 threshold
-            (dataframe["volume"] > 0),
+            macro_bull & mid_bull & ema_bull & adx_ok & rsi_in_zone & vol_ok,
             "enter_long"
         ] = 1
 
-        dataframe.loc[
-            (combined < -0.06) &
-            (dataframe["volume"] > 0),
-            "enter_short"
-        ] = 1
-
+        # (Shorts disabled: can_short = False — column kept for interface compliance)
         return dataframe
 
-    def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-        dataframe["internal_score"] = dataframe.apply(self._internal_score, axis=1)
+    # ── exit signals (fully vectorised) ──────────────────────────────────
 
-        dataframe.loc[dataframe["internal_score"] <= 0, "exit_long"]  = 1
-        dataframe.loc[dataframe["internal_score"] >= 0, "exit_short"] = 1
+    def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+        # Clear trend reversal: fast EMA crossed below slow AND price lost medium support
+        ema_reversal  = (dataframe["ema9"] < dataframe["ema21"]) & \
+                        (dataframe["close"] < dataframe["ema50"])
+        # Momentum exhaustion: RSI overbought
+        rsi_exhausted = dataframe["rsi"] > self.rsi_overbought.value
+
+        dataframe.loc[ema_reversal | rsi_exhausted, "exit_long"] = 1
 
         return dataframe
 
@@ -122,24 +170,34 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
         sig    = self.niblit_signal()
         conf   = self.niblit_confidence()
         regime = self.niblit_regime()
+        is_long = side == "long"
 
-        # Regime block
+        # Regime block — dangerous market conditions
         if regime in ("volatile", "crash", "bear"):
-            logger.info("NiblitAiMaster: blocking entry — regime=%s", regime)
+            logger.info("NiblitAiMaster: blocking entry — regime=%s pair=%s", regime, pair)
             return False
 
-        # Combined score check (replicate LEAN logic)
-        internal_ok = True  # signal already validated in populate_entry_trend
-
+        # Niblit AI veto — only applied when a live signal is available
         if sig is not None:
             niblit_score = (1.0 if sig == "BUY" else -1.0 if sig == "SELL" else 0.0) * conf
-            is_long      = side == "long"
             combined     = _NIBLIT_WEIGHT * niblit_score + _INTERNAL_WEIGHT * (1.0 if is_long else -1.0)
             threshold    = 0.20
-            if is_long  and combined < threshold:
+            if is_long and combined < threshold:
+                logger.info(
+                    "NiblitAiMaster: AI veto LONG — pair=%s sig=%s conf=%.2f combined=%.2f",
+                    pair, sig, conf, combined,
+                )
                 return False
             if not is_long and combined > -threshold:
+                logger.info(
+                    "NiblitAiMaster: AI veto SHORT — pair=%s sig=%s conf=%.2f combined=%.2f",
+                    pair, sig, conf, combined,
+                )
                 return False
+            logger.debug(
+                "NiblitAiMaster: AI accept %s — pair=%s sig=%s conf=%.2f combined=%.2f",
+                side, pair, sig, conf, combined,
+            )
 
         return True
 
@@ -155,12 +213,33 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     def custom_exit(self, pair: str, trade, current_time: datetime,
                     current_rate: float, current_profit: float,
                     **kwargs) -> Optional[str]:
-        """Force-exit open longs when Niblit signals a dangerous market regime."""
+        """Regime-based force-exit and profit-protection early exit."""
+        is_long = not getattr(trade, "is_short", False)
+
+        # Force-exit on dangerous regime (live only; no-op in backtesting)
         regime = self.niblit_regime()
-        is_long = not getattr(trade, "is_short", True)
         if is_long and regime in ("volatile", "crash", "bear"):
-            logger.info("NiblitAiMaster: force-exit long — regime=%s", regime)
+            logger.info("NiblitAiMaster: force-exit long — regime=%s pair=%s", regime, pair)
             return f"regime_{regime}"
+
+        # Profit protection: if we're up and the fast EMA has turned against us, exit early
+        # rather than waiting for the full trailing stop to fire.
+        if is_long and current_profit > 0.01:
+            try:
+                dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+                if not dataframe.empty:
+                    last = dataframe.iloc[-1]
+                    ema9  = last.get("ema9",  float("nan"))
+                    ema21 = last.get("ema21", float("nan"))
+                    if ema9 < ema21:
+                        logger.info(
+                            "NiblitAiMaster: profit-protect exit — pair=%s profit=%.2f%%",
+                            pair, current_profit * 100,
+                        )
+                        return "profit_protect"
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+                pass
+
         return None
 
     def confirm_trade_exit(self, pair: str, trade, order_type: str, amount: float,
