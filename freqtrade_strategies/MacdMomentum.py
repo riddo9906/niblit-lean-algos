@@ -43,8 +43,8 @@ class MacdMomentum(NiblitSignalMixin, IStrategy):
                        signal=self.macd_signal.value)
         if macd is not None:
             dataframe["macd"]         = macd.iloc[:, 0]
-            dataframe["macd_signal"]  = macd.iloc[:, 1]
-            dataframe["macd_hist"]    = macd.iloc[:, 2]
+            dataframe["macd_hist"]    = macd.iloc[:, 1]
+            dataframe["macd_signal"]  = macd.iloc[:, 2]
         dataframe["sma200"] = ta.sma(dataframe["close"], length=200)
         dataframe["atr"]    = ta.atr(dataframe["high"], dataframe["low"],
                                      dataframe["close"], length=14)

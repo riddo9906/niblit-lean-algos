@@ -143,7 +143,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
 
         return True
 
-    def custom_stake_amount(self, current_time: datetime, current_rate: float,
+    def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float],
                             max_stake: float, leverage: float,
                             entry_tag: Optional[str], side: str, **kwargs) -> float:
@@ -152,23 +152,20 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
             proposed_stake *= 0.5
         return max(proposed_stake, min_stake or 0)
 
+    def custom_exit(self, pair: str, trade, current_time: datetime,
+                    current_rate: float, current_profit: float,
+                    **kwargs) -> Optional[str]:
+        """Force-exit open longs when Niblit signals a dangerous market regime."""
+        regime = self.niblit_regime()
+        is_long = not getattr(trade, "is_short", True)
+        if is_long and regime in ("volatile", "crash", "bear"):
+            logger.info("NiblitAiMaster: force-exit long — regime=%s", regime)
+            return f"regime_{regime}"
+        return None
+
     def confirm_trade_exit(self, pair: str, trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time, **kwargs) -> bool:
-        regime = self.niblit_regime()
-        is_long: Optional[bool] = getattr(trade, "is_long", None)
-        if is_long is None:
-            direction = getattr(trade, "trade_direction", None)
-            if direction is None:
-                direction = getattr(trade, "entry_side", None)
-            if isinstance(direction, str):
-                is_long = direction.lower() in ("long", "buy")
-            else:
-                logger.warning("NiblitAiMaster: unknown trade direction type=%s", type(trade).__name__)
-        # Force-exit longs in dangerous regimes
-        if is_long is True and regime in ("volatile", "crash", "bear"):
-            logger.info("NiblitAiMaster: force-exiting long — regime=%s", regime)
-            return True
         return True
 
     # ── results write-back ────────────────────────────────────────────────
