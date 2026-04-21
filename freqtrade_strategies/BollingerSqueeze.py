@@ -40,9 +40,9 @@ class BollingerSqueeze(NiblitSignalMixin, IStrategy):
         # Bollinger Bands
         bbands = ta.bbands(dataframe["close"], length=20, std=self.bb_std.value)
         if bbands is not None:
-            dataframe["bb_upper"]  = bbands.iloc[:, 0]
+            dataframe["bb_lower"]  = bbands.iloc[:, 0]
             dataframe["bb_mid"]    = bbands.iloc[:, 1]
-            dataframe["bb_lower"]  = bbands.iloc[:, 2]
+            dataframe["bb_upper"]  = bbands.iloc[:, 2]
 
         # ATR for Keltner Channel
         dataframe["atr"]    = ta.atr(dataframe["high"], dataframe["low"],
