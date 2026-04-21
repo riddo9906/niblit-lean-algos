@@ -156,8 +156,15 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time, **kwargs) -> bool:
         regime = self.niblit_regime()
+        is_long = getattr(trade, "is_long", None)
+        if is_long is None:
+            direction = getattr(trade, "trade_direction", None) or getattr(trade, "entry_side", None)
+            if isinstance(direction, str):
+                is_long = direction.lower() in ("long", "buy")
+            else:
+                is_long = True
         # Force-exit longs in dangerous regimes
-        if trade.is_long and regime in ("volatile", "crash", "bear"):
+        if is_long and regime in ("volatile", "crash", "bear"):
             logger.info("NiblitAiMaster: force-exiting long — regime=%s", regime)
             return True
         return True
