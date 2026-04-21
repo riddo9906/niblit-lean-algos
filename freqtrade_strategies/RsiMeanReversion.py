@@ -31,6 +31,7 @@ class RsiMeanReversion(NiblitSignalMixin, IStrategy):
 
     rsi_period     = IntParameter(10, 20,  default=14,  space="buy", optimize=True)
     rsi_oversold   = DecimalParameter(20, 35, default=30, decimals=0, space="buy", optimize=True)
+    # Freqtrade uses the "sell" optimization space for long exit conditions.
     rsi_exit       = DecimalParameter(45, 55, default=50, decimals=0, space="sell", optimize=True)
 
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:

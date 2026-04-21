@@ -5,7 +5,7 @@ Squeeze condition: Bollinger Bands (20, 2σ) are entirely inside the
 Keltner Channel (20, 1.5 × ATR).
 
 Entry: Squeeze releases AND momentum (close > BB midline).
-Exit:  Price touches upper BB band OR minimal_roi OR stoploss.
+Exit:  Price reaches or exceeds upper BB band OR minimal_roi OR stoploss.
 Niblit: Blocks entry when AI direction contradicts breakout direction.
 Timeframe: 1h (crypto, Binance).
 """
