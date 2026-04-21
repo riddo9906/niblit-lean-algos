@@ -2,8 +2,7 @@
 RSI Mean Reversion — Freqtrade strategy.
 
 Entry (long):  RSI < 30 AND EMA50 > EMA200 (uptrend context).
-Entry (short): RSI > 70 AND EMA50 < EMA200 (downtrend context).
-Exit:          RSI crosses 50 OR minimal_roi OR stoploss.
+Exit:          RSI mean-reverts to exit threshold OR minimal_roi OR stoploss.
 Niblit:        Veto blocks entry when AI says strongly opposite direction.
 Timeframe:     1h (crypto, Binance).
 """
@@ -32,7 +31,6 @@ class RsiMeanReversion(NiblitSignalMixin, IStrategy):
 
     rsi_period     = IntParameter(10, 20,  default=14,  space="buy", optimize=True)
     rsi_oversold   = DecimalParameter(20, 35, default=30, decimals=0, space="buy", optimize=True)
-    rsi_overbought = DecimalParameter(65, 80, default=70, decimals=0, space="sell", optimize=True)
     rsi_exit       = DecimalParameter(45, 55, default=50, decimals=0, space="sell", optimize=True)
 
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -51,24 +49,12 @@ class RsiMeanReversion(NiblitSignalMixin, IStrategy):
             "enter_long"
         ] = 1
 
-        dataframe.loc[
-            (dataframe["rsi"] > self.rsi_overbought.value) &
-            (dataframe["ema50"] < dataframe["ema200"]) &
-            (dataframe["volume"] > 0),
-            "enter_short"
-        ] = 1
-
         return dataframe
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         dataframe.loc[
             (dataframe["rsi"] >= self.rsi_exit.value),
             "exit_long"
-        ] = 1
-
-        dataframe.loc[
-            (dataframe["rsi"] <= self.rsi_exit.value),
-            "exit_short"
         ] = 1
 
         return dataframe

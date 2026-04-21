@@ -2,8 +2,7 @@
 EMA Triple Cross — Freqtrade strategy.
 
 Entry (long):  EMA9 > EMA21 > EMA50 — all three EMAs aligned bullish.
-Entry (short): EMA9 < EMA21 < EMA50 — all three EMAs aligned bearish.
-Exit:          Opposite EMA alignment OR minimal_roi OR stoploss.
+Exit:          EMA alignment turns bearish OR minimal_roi OR stoploss.
 Niblit:        Blocks entry when AI signal contradicts direction.
 Timeframe:     1h  (crypto, Binance).
 """
@@ -55,13 +54,6 @@ class EmaTripleCross(NiblitSignalMixin, IStrategy):
             "enter_long"
         ] = 1
 
-        dataframe.loc[
-            (dataframe[fast] < dataframe[mid]) &
-            (dataframe[mid]  < dataframe[slow]) &
-            (dataframe["volume"] > 0),
-            "enter_short"
-        ] = 1
-
         return dataframe
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -73,12 +65,6 @@ class EmaTripleCross(NiblitSignalMixin, IStrategy):
             (dataframe[fast] < dataframe[mid]) &
             (dataframe[mid]  < dataframe[slow]),
             "exit_long"
-        ] = 1
-
-        dataframe.loc[
-            (dataframe[fast] > dataframe[mid]) &
-            (dataframe[mid]  > dataframe[slow]),
-            "exit_short"
         ] = 1
 
         return dataframe

@@ -4,9 +4,8 @@ Bollinger Squeeze — Freqtrade strategy.
 Squeeze condition: Bollinger Bands (20, 2σ) are entirely inside the
 Keltner Channel (20, 1.5 × ATR).
 
-Entry: Squeeze releases AND momentum (close > BB midline → long;
-       close < BB midline → short).
-Exit:  Price touches opposite BB band OR minimal_roi OR stoploss.
+Entry: Squeeze releases AND momentum (close > BB midline).
+Exit:  Price touches upper BB band OR minimal_roi OR stoploss.
 Niblit: Blocks entry when AI direction contradicts breakout direction.
 Timeframe: 1h (crypto, Binance).
 """
@@ -72,24 +71,12 @@ class BollingerSqueeze(NiblitSignalMixin, IStrategy):
             "enter_long"
         ] = 1
 
-        dataframe.loc[
-            (dataframe["squeeze_release"] == 1) &
-            (dataframe["close"] < dataframe["bb_mid"]) &
-            (dataframe["volume"] > 0),
-            "enter_short"
-        ] = 1
-
         return dataframe
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         dataframe.loc[
             dataframe["close"] >= dataframe["bb_upper"],
             "exit_long"
-        ] = 1
-
-        dataframe.loc[
-            dataframe["close"] <= dataframe["bb_lower"],
-            "exit_short"
         ] = 1
 
         return dataframe

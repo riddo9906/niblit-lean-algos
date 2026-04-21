@@ -2,8 +2,7 @@
 Supertrend ATR — Freqtrade strategy.
 
 Entry (long):  Supertrend flips bullish (trend direction changes to +1).
-Entry (short): Supertrend flips bearish (trend direction changes to -1).
-Exit:          Supertrend flips against position OR stoploss.
+Exit:          Supertrend flips bearish OR stoploss.
 Niblit:        Blocks entry when AI confidence > 0.7 and contradicts direction.
 Timeframe:     1h (crypto, Binance) — matching original LEAN hourly consolidation.
 """
@@ -59,14 +58,6 @@ class SupertrendAtr(NiblitSignalMixin, IStrategy):
             "enter_long"
         ] = 1
 
-        # Short: direction flips to -1 (was +1)
-        dataframe.loc[
-            (dataframe["st_direction"] == -1) &
-            (dataframe["st_direction"].shift(1) == 1) &
-            (dataframe["volume"] > 0),
-            "enter_short"
-        ] = 1
-
         return dataframe
 
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -74,8 +65,6 @@ class SupertrendAtr(NiblitSignalMixin, IStrategy):
             return dataframe
 
         dataframe.loc[dataframe["st_direction"] == -1, "exit_long"]  = 1
-        dataframe.loc[dataframe["st_direction"] ==  1, "exit_short"] = 1
-
         return dataframe
 
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float,

@@ -159,12 +159,12 @@ python scripts/ft_live.py balance
 
 | Strategy | Signal Logic | Stoploss | Short? | Hyperopt Params | Live-Ready |
 |----------|-------------|----------|--------|-----------------|-----------|
-| **EmaTripleCross** | EMA9 > EMA21 > EMA50 alignment | -3% | ✅ | EMA periods (fast/mid/slow) | ✅ |
-| **MacdMomentum** | MACD histogram cross + SMA200 regime | -4% | ✅ | MACD fast/slow/signal | ✅ |
-| **RsiMeanReversion** | RSI < 30/> 70 + EMA50/200 filter | -3% | ✅ | RSI period + thresholds | ✅ |
-| **BollingerSqueeze** | BB squeeze release + momentum | -3% | ✅ | BB std, Keltner multiplier | ✅ |
-| **SupertrendAtr** | Supertrend flip + ATR | -5% | ✅ | ST period + multiplier | ✅ |
-| **NiblitAiMaster** | 70% Niblit AI + 30% EMA/RSI | -3% | ✅ | None (regime-driven) | ✅ |
+| **EmaTripleCross** | EMA9 > EMA21 > EMA50 alignment | -3% | ❌ | EMA periods (fast/mid/slow) | ✅ |
+| **MacdMomentum** | MACD histogram cross + SMA200 regime | -4% | ❌ | MACD fast/slow/signal | ✅ |
+| **RsiMeanReversion** | RSI oversold + EMA50/200 uptrend filter | -3% | ❌ | RSI period + thresholds | ✅ |
+| **BollingerSqueeze** | BB squeeze release + bullish momentum | -3% | ❌ | BB std, Keltner multiplier | ✅ |
+| **SupertrendAtr** | Supertrend bullish flip + ATR | -5% | ❌ | ST period + multiplier | ✅ |
+| **NiblitAiMaster** | 70% Niblit AI + 30% EMA/RSI | -3% | ❌ | None (regime-driven) | ✅ |
 
 All strategies use **`INTERFACE_VERSION = 3`**, `timeframe = "1h"`, and include `confirm_trade_entry()` for Niblit AI veto.
 
