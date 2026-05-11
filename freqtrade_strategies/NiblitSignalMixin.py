@@ -16,10 +16,14 @@ from typing import Any, Dict, List, Optional
 try:
     from .advisor_protocol import summarize_debate
     from .cognitive_envelope import read_envelope_file
+    from .execution_replay import ExecutionReplayWriter
+    from .runtime_adapter import RuntimeAdapter, get_global_adapter
     from .trade_governance import TradeGovernanceGate
 except ImportError:
     from advisor_protocol import summarize_debate
     from cognitive_envelope import read_envelope_file
+    from execution_replay import ExecutionReplayWriter
+    from runtime_adapter import RuntimeAdapter, get_global_adapter
     from trade_governance import TradeGovernanceGate
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,10 @@ _DEFAULT_SIGNAL_FILE = os.environ.get(
 )
 _MAX_SIGNAL_AGE_SECS: int = int(os.environ.get("NIBLIT_SIGNAL_MAX_AGE", "300"))
 _NIBLIT_MIN_CONF: float = float(os.environ.get("NIBLIT_MIN_CONF", "0.55"))
+_TRACE_FILE: str = os.environ.get(
+    "NIBLIT_TRACE_FILE",
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_execution_trace.jsonl"),
+)
 
 
 class NiblitSignalMixin:
@@ -54,6 +62,22 @@ class NiblitSignalMixin:
     niblit_weight_model_consensus: float = float(os.environ.get("NIBLIT_WEIGHT_MODEL_CONSENSUS", "1.0"))
     niblit_weight_disagreement_inverse: float = float(os.environ.get("NIBLIT_WEIGHT_DISAGREEMENT_INVERSE", "1.0"))
     niblit_min_health_multiplier: float = float(os.environ.get("NIBLIT_MIN_HEALTH_MULTIPLIER", "0.05"))
+
+    def _niblit_adapter(self) -> RuntimeAdapter:
+        if not hasattr(self, "_niblit_adapter_instance"):
+            self._niblit_adapter_instance = get_global_adapter()
+        return self._niblit_adapter_instance
+
+    def _niblit_replay(self) -> ExecutionReplayWriter:
+        if not hasattr(self, "_niblit_replay_instance"):
+            self._niblit_replay_instance = ExecutionReplayWriter(trace_file=_TRACE_FILE)
+        return self._niblit_replay_instance
+
+    def _niblit_enrich_envelope(self, envelope: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Merge live runtime adapter state into the envelope before governance."""
+        if envelope is None:
+            return None
+        return self._niblit_adapter().enrich_envelope(envelope)
 
     def _niblit_gate(self) -> TradeGovernanceGate:
         if not hasattr(self, "_niblit_gate_instance"):
@@ -114,6 +138,7 @@ class NiblitSignalMixin:
         envelope = self._niblit_read()
         if envelope is None:
             return True
+        envelope = self._niblit_enrich_envelope(envelope)
 
         debate = summarize_debate(envelope)
         envelope["model_consensus"] = debate.model_consensus
@@ -149,6 +174,23 @@ class NiblitSignalMixin:
             mode=decision.mode,
         )
         self._log_governance_decision(pair)
+        self._niblit_replay().record_entry_decision(
+            pair=pair,
+            envelope=envelope,
+            governance_decision={
+                "allow": decision.allow,
+                "mode": decision.mode,
+                "reasons": decision.reasons,
+                "overrides": decision.overrides,
+            },
+            consensus_state={
+                "model_consensus": debate.model_consensus,
+                "strategy_disagreement": debate.strategy_disagreement,
+                "coalition": debate.coalition,
+                "vote_count": debate.vote_count,
+                "direction": debate.direction,
+            },
+        )
         return decision.allow
 
     def niblit_should_force_exit(self, is_long: bool = True) -> bool:
@@ -156,6 +198,7 @@ class NiblitSignalMixin:
         envelope = self._niblit_read()
         if envelope is None:
             return False
+        envelope = self._niblit_enrich_envelope(envelope)
         debate = summarize_debate(envelope)
         envelope["model_consensus"] = debate.model_consensus
         envelope["strategy_disagreement"] = debate.strategy_disagreement
