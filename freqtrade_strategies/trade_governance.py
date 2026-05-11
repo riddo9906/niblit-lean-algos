@@ -82,6 +82,7 @@ class TradeGovernanceGate:
         survival_mode = bool(governance.get("survival_mode", False))
         hold_only = bool(execution.get("hold_only", False))
         runtime_mode = str(runtime.get("mode", governance.get("governance_mode", "normal"))).lower()
+        # Backward-compat alias: legacy "constrained" maps to current "cautious".
         if runtime_mode == "constrained":
             runtime_mode = "cautious"
 

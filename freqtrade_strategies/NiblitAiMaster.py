@@ -339,5 +339,5 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                 os.makedirs(dir_path, exist_ok=True)
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload) + "\n")
-        except (OSError, ValueError, TypeError):
-            logger.debug("Unable to append event file at %s", path)
+        except OSError as exc:
+            logger.warning("Unable to append event file at %s: %s", path, exc)

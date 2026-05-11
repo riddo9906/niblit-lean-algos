@@ -303,6 +303,11 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `NIBLIT_WEIGHT_RUNTIME_STABILITY` | `1.0` | Exponent weight for runtime stability in adaptive sizing |
 | `NIBLIT_WEIGHT_GOVERNANCE_STABILITY` | `1.0` | Exponent weight for governance stability in adaptive sizing |
 | `NIBLIT_WEIGHT_EMERGENCE_INVERSE` | `1.0` | Exponent weight for inverse emergence risk in adaptive sizing |
+| `NIBLIT_WEIGHT_ATTENTION_INVERSE` | `1.0` | Exponent weight for inverse attention pressure in adaptive sizing |
+| `NIBLIT_WEIGHT_COGNITIVE_BUDGET` | `1.0` | Exponent weight for cognitive budget in adaptive sizing |
+| `NIBLIT_WEIGHT_ATTENTION_AVAILABLE` | `1.0` | Exponent weight for attention availability in adaptive sizing |
+| `NIBLIT_WEIGHT_MODEL_CONSENSUS` | `1.0` | Exponent weight for advisor consensus in adaptive sizing |
+| `NIBLIT_WEIGHT_DISAGREEMENT_INVERSE` | `1.0` | Exponent weight for inverse advisor disagreement in adaptive sizing |
 
 Copy `.env.example` to `.env` and fill in values before running locally.
 

@@ -190,7 +190,7 @@ def read_signal() -> None:
         return
 
     ts = int(payload.get("timestamp", 0))
-    age = int(time.time()) - ts if ts > 0 else 0
+    age = max(0, int(time.time()) - ts) if ts > 0 else 0
     stale = age > 300
     stale_tag = f"  ⚠ STALE ({age}s old)" if stale else f"  ✅ fresh ({age}s old)"
     print(f"\n📡 Current Niblit signal ({path}){stale_tag}")
@@ -203,7 +203,7 @@ def _print_signal(payload: Dict[str, Any]) -> None:
     sym = payload.get("symbol", "?")
     price = payload.get("price", 0.0)
     reg = payload.get("market_regime", payload.get("regime", "?"))
-    risk = float(payload.get("risk_pct", 0.0) or 0.0)
+    risk = float(payload.get("risk_pct", 0.0))
     ts = int(payload.get("timestamp", 0))
     color = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(sig, "⚪")
 

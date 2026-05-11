@@ -48,10 +48,15 @@ class NiblitSignalMixin:
     niblit_weight_runtime_stability: float = float(os.environ.get("NIBLIT_WEIGHT_RUNTIME_STABILITY", "1.0"))
     niblit_weight_governance_stability: float = float(os.environ.get("NIBLIT_WEIGHT_GOVERNANCE_STABILITY", "1.0"))
     niblit_weight_emergence_inverse: float = float(os.environ.get("NIBLIT_WEIGHT_EMERGENCE_INVERSE", "1.0"))
+    niblit_weight_attention_inverse: float = float(os.environ.get("NIBLIT_WEIGHT_ATTENTION_INVERSE", "1.0"))
+    niblit_weight_cognitive_budget: float = float(os.environ.get("NIBLIT_WEIGHT_COGNITIVE_BUDGET", "1.0"))
+    niblit_weight_attention_available: float = float(os.environ.get("NIBLIT_WEIGHT_ATTENTION_AVAILABLE", "1.0"))
+    niblit_weight_model_consensus: float = float(os.environ.get("NIBLIT_WEIGHT_MODEL_CONSENSUS", "1.0"))
+    niblit_weight_disagreement_inverse: float = float(os.environ.get("NIBLIT_WEIGHT_DISAGREEMENT_INVERSE", "1.0"))
     niblit_min_health_multiplier: float = float(os.environ.get("NIBLIT_MIN_HEALTH_MULTIPLIER", "0.05"))
 
     def _niblit_gate(self) -> TradeGovernanceGate:
-        if not hasattr(self, "__niblit_gate"):
+        if not hasattr(self, "_niblit_gate_instance"):
             gate = TradeGovernanceGate()
             gate.survival_coherence_threshold = float(
                 os.environ.get("NIBLIT_SURVIVAL_COHERENCE", gate.survival_coherence_threshold)
@@ -68,8 +73,8 @@ class NiblitSignalMixin:
             gate.min_cognitive_budget = float(
                 os.environ.get("NIBLIT_MIN_COGNITIVE_BUDGET", gate.min_cognitive_budget)
             )
-            self.__niblit_gate = gate
-        return self.__niblit_gate
+            self._niblit_gate_instance = gate
+        return self._niblit_gate_instance
 
     def niblit_envelope(self) -> Optional[Dict[str, Any]]:
         return self._niblit_read()
@@ -263,8 +268,22 @@ class NiblitSignalMixin:
         disagreement: float,
     ) -> float:
         ts = int(envelope.get("timestamp", 0))
+        cache_key = (
+            ts,
+            round(confidence, 6),
+            round(coherence, 6),
+            round(agreement, 6),
+            round(runtime_stability, 6),
+            round(governance_stability, 6),
+            round(emergence_risk, 6),
+            round(attention_pressure, 6),
+            round(cognitive_budget, 6),
+            round(attention_available, 6),
+            round(model_consensus, 6),
+            round(disagreement, 6),
+        )
         cache = getattr(self, "_niblit_health_cache", None)
-        if cache and cache.get("timestamp") == ts:
+        if cache and cache.get("key") == cache_key:
             return float(cache.get("value", 1.0))
 
         value = (
@@ -274,16 +293,16 @@ class NiblitSignalMixin:
             * (runtime_stability ** self.niblit_weight_runtime_stability)
             * (governance_stability ** self.niblit_weight_governance_stability)
             * (max(0.0, 1.0 - emergence_risk) ** self.niblit_weight_emergence_inverse)
-            * max(0.0, min(1.0, 1.0 - attention_pressure))
-            * max(0.0, min(1.0, cognitive_budget))
-            * max(0.0, min(1.0, attention_available))
-            * max(0.0, min(1.0, model_consensus))
-            * max(0.0, min(1.0, 1.0 - disagreement))
+            * (max(0.0, min(1.0, 1.0 - attention_pressure)) ** self.niblit_weight_attention_inverse)
+            * (max(0.0, min(1.0, cognitive_budget)) ** self.niblit_weight_cognitive_budget)
+            * (max(0.0, min(1.0, attention_available)) ** self.niblit_weight_attention_available)
+            * (max(0.0, min(1.0, model_consensus)) ** self.niblit_weight_model_consensus)
+            * (max(0.0, min(1.0, 1.0 - disagreement)) ** self.niblit_weight_disagreement_inverse)
         )
         # Keep a small configurable floor to avoid accidental zero sizing from
         # one noisy factor while still keeping sizing strongly defensive.
         value = max(self.niblit_min_health_multiplier, min(1.0, value))
-        self._niblit_health_cache = {"timestamp": ts, "value": value}
+        self._niblit_health_cache = {"key": cache_key, "value": value}
         return value
 
     def niblit_execution_snapshot(self) -> Dict[str, Any]:

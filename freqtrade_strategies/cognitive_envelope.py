@@ -100,8 +100,8 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
                 "cognitive_budget": 1.0,
                 "attention_available": 1.0,
             },
+            # Canonical source field is advisor_votes; advisor_vote is legacy.
             "advisors": {
-                # Canonical field is advisor_votes; advisor_vote is legacy.
                 "votes": source.get("advisor_votes", source.get("advisor_vote", {})),
             },
             "reflection": {
