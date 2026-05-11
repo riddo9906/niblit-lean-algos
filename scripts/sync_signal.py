@@ -5,6 +5,12 @@ scripts/sync_signal.py — write/read a Niblit cognitive execution envelope.
 
 Default behavior writes schema_version=2.0 envelopes while preserving
 legacy compatibility fields (signal/confidence/regime/risk_pct/timestamp).
+
+Usage:
+    python scripts/sync_signal.py --signal BUY --confidence 0.8
+    python scripts/sync_signal.py --signal HOLD --runtime-mode survival --hold-only
+    python scripts/sync_signal.py --signal BUY --regime volatile_breakout --intent momentum_continuation
+    python scripts/sync_signal.py --read
 """
 
 from __future__ import annotations
@@ -139,8 +145,8 @@ def read_signal() -> None:
         print(f"❌ Could not read signal file: {exc}")
         return
 
-    ts = int(payload.get("timestamp", 0) or 0)
-    age = int(time.time()) - ts if ts else 0
+    ts = int(payload.get("timestamp", 0))
+    age = int(time.time()) - ts if ts > 0 else 0
     stale = age > 300
     stale_tag = f"  ⚠ STALE ({age}s old)" if stale else f"  ✅ fresh ({age}s old)"
     print(f"\n📡 Current Niblit signal ({path}){stale_tag}")
@@ -149,12 +155,12 @@ def read_signal() -> None:
 
 def _print_signal(payload: Dict[str, Any]) -> None:
     sig = payload.get("signal", "?")
-    conf = float(payload.get("confidence", 0.0) or 0.0)
+    conf = float(payload.get("confidence", 0.0))
     sym = payload.get("symbol", "?")
     price = payload.get("price", 0.0)
     reg = payload.get("market_regime", payload.get("regime", "?"))
     risk = float(payload.get("risk_pct", 0.0) or 0.0)
-    ts = int(payload.get("timestamp", 0) or 0)
+    ts = int(payload.get("timestamp", 0))
     color = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(sig, "⚪")
 
     print(f"  {color} Signal      : {sig}")
@@ -209,7 +215,7 @@ def main() -> None:
     parser.add_argument("--price", type=float, default=0.0,
                         help="Current price (0 = unknown)")
     parser.add_argument("--regime", default="bullish",
-                        help="Market regime label (default: bullish)")
+                        help="Market regime label, e.g. bullish, volatile_breakout, liquidity_trap (default: bullish)")
     parser.add_argument("--risk-pct", type=float, default=0.02,
                         help="Suggested max position size fraction (default: 0.02)")
     parser.add_argument("--rsi", type=float, default=None,

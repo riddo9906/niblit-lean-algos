@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, Optional
@@ -24,6 +25,8 @@ _REQUIRED_V2_FIELDS = (
     "temporal",
 )
 
+logger = logging.getLogger(__name__)
+
 
 # pylint: disable=too-many-branches
 def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -37,6 +40,7 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     if schema_version and schema_version.startswith("2"):
         missing = [field for field in _REQUIRED_V2_FIELDS if field not in source]
         if missing:
+            logger.warning("Invalid cognitive envelope: missing required fields %s", missing)
             return None
         normalized = source
     else:
@@ -87,7 +91,8 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
                 "emergence_risk": 0.0,
             },
             "advisors": {
-                "votes": source.get("advisor_vote", {}),
+                # Canonical field is advisor_votes; advisor_vote is legacy.
+                "votes": source.get("advisor_votes", source.get("advisor_vote", {})),
             },
             "legacy": source,
         }

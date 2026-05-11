@@ -97,7 +97,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
         self._trade_count: int   = 0
         self._win_count:   int   = 0
         self._total_pnl:   float = 0.0
-        self._last_regime: str = "unknown"
+        self._last_regime: Optional[str] = None
 
     # ── indicators ────────────────────────────────────────────────────────
 
@@ -306,7 +306,9 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     @staticmethod
     def _append_jsonl(path: str, payload: dict) -> None:
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            dir_path = os.path.dirname(path)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload) + "\n")
         except (OSError, ValueError, TypeError):

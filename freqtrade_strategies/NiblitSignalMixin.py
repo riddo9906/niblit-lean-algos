@@ -40,6 +40,13 @@ class NiblitSignalMixin:
     niblit_min_conf: float = _NIBLIT_MIN_CONF
     niblit_signal_file: str = _DEFAULT_SIGNAL_FILE
     niblit_max_age: int = _MAX_SIGNAL_AGE_SECS
+    niblit_weight_confidence: float = float(os.environ.get("NIBLIT_WEIGHT_CONFIDENCE", "1.0"))
+    niblit_weight_coherence: float = float(os.environ.get("NIBLIT_WEIGHT_COHERENCE", "1.0"))
+    niblit_weight_agreement: float = float(os.environ.get("NIBLIT_WEIGHT_AGREEMENT", "1.0"))
+    niblit_weight_runtime_stability: float = float(os.environ.get("NIBLIT_WEIGHT_RUNTIME_STABILITY", "1.0"))
+    niblit_weight_governance_stability: float = float(os.environ.get("NIBLIT_WEIGHT_GOVERNANCE_STABILITY", "1.0"))
+    niblit_weight_emergence_inverse: float = float(os.environ.get("NIBLIT_WEIGHT_EMERGENCE_INVERSE", "1.0"))
+    niblit_min_health_multiplier: float = float(os.environ.get("NIBLIT_MIN_HEALTH_MULTIPLIER", "0.05"))
 
     def _niblit_gate(self) -> TradeGovernanceGate:
         if not hasattr(self, "__niblit_gate"):
@@ -167,13 +174,17 @@ class NiblitSignalMixin:
         if not decision.allow:
             return min_stake or 0
 
-        health_multiplier = (
-            confidence
-            * coherence
-            * agreement
-            * runtime_stability
-            * governance_stability
-            * max(0.0, 1.0 - emergence_risk)
+        # Multiplicative blend intentionally suppresses size when any cognition
+        # health dimension degrades; clamp with a floor to avoid zeroing due to
+        # a single noisy input while still remaining conservative.
+        health_multiplier = self._niblit_health_multiplier(
+            envelope=envelope,
+            confidence=confidence,
+            coherence=coherence,
+            agreement=agreement,
+            runtime_stability=runtime_stability,
+            governance_stability=governance_stability,
+            emergence_risk=emergence_risk,
         )
 
         position_multiplier = float(decision.overrides.get("position_multiplier", 1.0))
@@ -192,6 +203,36 @@ class NiblitSignalMixin:
             sized = max(sized, min_stake)
 
         return max(0.0, sized)
+
+    # pylint: disable=too-many-arguments
+    def _niblit_health_multiplier(
+        self,
+        envelope: Dict[str, Any],
+        confidence: float,
+        coherence: float,
+        agreement: float,
+        runtime_stability: float,
+        governance_stability: float,
+        emergence_risk: float,
+    ) -> float:
+        ts = int(envelope.get("timestamp", 0))
+        cache = getattr(self, "_niblit_health_cache", None)
+        if cache and cache.get("timestamp") == ts:
+            return float(cache.get("value", 1.0))
+
+        value = (
+            (confidence ** self.niblit_weight_confidence)
+            * (coherence ** self.niblit_weight_coherence)
+            * (agreement ** self.niblit_weight_agreement)
+            * (runtime_stability ** self.niblit_weight_runtime_stability)
+            * (governance_stability ** self.niblit_weight_governance_stability)
+            * (max(0.0, 1.0 - emergence_risk) ** self.niblit_weight_emergence_inverse)
+        )
+        # Keep a small configurable floor to avoid accidental zero sizing from
+        # one noisy factor while still keeping sizing strongly defensive.
+        value = max(self.niblit_min_health_multiplier, min(1.0, value))
+        self._niblit_health_cache = {"timestamp": ts, "value": value}
+        return value
 
     def niblit_execution_snapshot(self) -> Dict[str, Any]:
         envelope = self._niblit_read() or {}

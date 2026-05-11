@@ -23,6 +23,10 @@ class TradeGovernanceGate:
     max_uncertainty: float = 0.55
     min_agreement: float = 0.40
 
+    # Regime-aware execution caps:
+    # - 0.0 means force HOLD (no new risk) for extreme instability regimes.
+    # - 0.01/0.02/0.03 progressively constrain exposure as uncertainty rises.
+    # - Keys include richer world-model identities published by the envelope.
     _REGIME_POSITION_CAP = {
         "volatile_breakout": 0.03,
         "liquidity_trap": 0.01,

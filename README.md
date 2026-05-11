@@ -27,7 +27,9 @@ The repository hosts two generations of Niblit trading code side-by-side:
 
 ## Project Overview
 
-Niblit AI now publishes a versioned cognitive execution envelope (schema `2.0`) that includes signal intent, forecast consensus, governance state, execution constraints, temporal coherence, and runtime mode. Freqtrade strategies read that file via the **`NiblitSignalMixin`** and act as advisors while governed execution gates make final allow/deny and sizing decisions.
+Niblit AI now publishes a versioned cognitive execution envelope (schema `2.0`).  
+It includes signal intent, forecast consensus, governance state, execution constraints, temporal coherence, and runtime mode.  
+Freqtrade strategies read that file via the **`NiblitSignalMixin`** and act as advisors while governed execution gates make final allow/deny and sizing decisions.
 
 - **Exchange**: Binance (spot and futures)
 - **Quote currency**: USDT
@@ -286,6 +288,7 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `NIBLIT_EPISODES_FILE` | `/tmp/niblit_market_episodes.jsonl` | Market episode events (JSONL) |
 | `NIBLIT_SURVIVAL_COHERENCE` | `0.30` | Coherence threshold triggering survival-mode block |
 | `NIBLIT_CONSTRAINED_COHERENCE` | `0.45` | Coherence threshold triggering constrained sizing |
+| `NIBLIT_MIN_HEALTH_MULTIPLIER` | `0.05` | Floor for adaptive sizing multiplier under degraded cognition |
 
 Copy `.env.example` to `.env` and fill in values before running locally.
 

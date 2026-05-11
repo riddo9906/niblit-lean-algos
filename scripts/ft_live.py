@@ -146,11 +146,16 @@ def _load_signal_payload() -> Dict[str, Any]:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return {"status": "invalid_signal_file", "path": str(path), "error": str(exc)}
 
-    runtime = payload.get("runtime", {}) if isinstance(payload.get("runtime"), dict) else {}
-    temporal = payload.get("temporal", {}) if isinstance(payload.get("temporal"), dict) else {}
-    forecast = payload.get("forecast_consensus", {}) if isinstance(payload.get("forecast_consensus"), dict) else {}
-    governance = payload.get("governance", {}) if isinstance(payload.get("governance"), dict) else {}
-    execution = payload.get("execution", {}) if isinstance(payload.get("execution"), dict) else {}
+    runtime = payload.get("runtime")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    temporal = payload.get("temporal")
+    temporal = temporal if isinstance(temporal, dict) else {}
+    forecast = payload.get("forecast_consensus")
+    forecast = forecast if isinstance(forecast, dict) else {}
+    governance = payload.get("governance")
+    governance = governance if isinstance(governance, dict) else {}
+    execution = payload.get("execution")
+    execution = execution if isinstance(execution, dict) else {}
 
     return {
         "status": "ok",
