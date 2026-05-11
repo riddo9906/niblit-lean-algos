@@ -114,3 +114,11 @@ jobs:
               sys.exit(1)
           print(f"All {len(algos)} algorithms have valid config.json")
           EOF
+
+      - name: Run focused governance envelope unit tests
+        run: |
+          if [ -d tests ]; then
+            python -m unittest discover -s tests -p "test_*.py"
+          else
+            echo "tests/ not found — skipping"
+          fi

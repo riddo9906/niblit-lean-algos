@@ -63,6 +63,7 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
                 "risk_tier": "medium",
                 "authority": "legacy_signal_bridge",
                 "survival_mode": False,
+                "governance_mode": "normal",
                 "governance_stability": 0.8,
                 "current_drawdown_pct": 0.0,
                 "max_drawdown_pct": 0.12,
@@ -73,26 +74,43 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
                 "allow_scale_in": False,
                 "hold_only": signal == "HOLD",
                 "runtime_stability": 0.8,
+                "execution_priority": "normal",
             },
             "world_model": {
                 "predicted_horizon": "unknown",
                 "scenario": "legacy_mode",
+                "forecast_uncertainty": float(1.0 - float(source.get("confidence", 0.5))),
             },
             "temporal": {
                 "epoch_id": int(source.get("timestamp", 0)),
                 "coherence_score": 0.7,
+                "epoch_alignment": "aligned",
             },
             "runtime": {
                 "mode": "normal",
                 "health": "unknown",
                 "instability": 0.0,
+                "attention_pressure": 0.2,
+                "runtime_health": 0.8,
             },
             "risk": {
                 "emergence_risk": 0.0,
             },
+            "resources": {
+                "cognitive_budget": 1.0,
+                "attention_available": 1.0,
+            },
             "advisors": {
                 # Canonical field is advisor_votes; advisor_vote is legacy.
                 "votes": source.get("advisor_votes", source.get("advisor_vote", {})),
+            },
+            "reflection": {
+                "reflection_confidence": float(source.get("confidence", 0.5)),
+            },
+            "trace": {
+                "causal_trace_id": f"legacy-{int(source.get('timestamp', 0))}",
+                "memory_reference_ids": [],
+                "subsystem_authority": "legacy_signal_bridge",
             },
             "legacy": source,
         }
@@ -140,6 +158,7 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
             "risk_tier": str(governance.get("risk_tier", "medium")),
             "authority": str(governance.get("authority", "trading_brain")),
             "survival_mode": bool(governance.get("survival_mode", False)),
+            "governance_mode": str(governance.get("governance_mode", "normal")).lower(),
             "governance_stability": max(0.0, min(1.0, float(governance.get("governance_stability", 0.8)))),
             "current_drawdown_pct": max(0.0, float(governance.get("current_drawdown_pct", 0.0))),
             "max_drawdown_pct": max(0.0, float(governance.get("max_drawdown_pct", 0.12))),
@@ -150,19 +169,47 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
             "allow_scale_in": bool(execution.get("allow_scale_in", False)),
             "hold_only": bool(execution.get("hold_only", signal == "HOLD")),
             "runtime_stability": max(0.0, min(1.0, float(execution.get("runtime_stability", 0.8)))),
+            "execution_priority": str(execution.get("execution_priority", "normal")).lower(),
         },
         "temporal": {
             "epoch_id": int(temporal.get("epoch_id", normalized.get("epoch", normalized.get("timestamp", 0)))),
             "coherence_score": max(0.0, min(1.0, float(temporal.get("coherence_score", 0.7)))),
+            "epoch_alignment": str(temporal.get("epoch_alignment", "aligned")),
         },
         "runtime": {
-            "mode": str(runtime.get("mode", "normal")),
+            "mode": str(runtime.get("mode", "normal")).lower(),
             "health": str(runtime.get("health", "unknown")),
             "instability": max(0.0, min(1.0, float(runtime.get("instability", 0.0)))),
+            "attention_pressure": max(0.0, min(1.0, float(runtime.get("attention_pressure", 0.2)))),
+            "runtime_health": max(0.0, min(1.0, float(runtime.get("runtime_health", 0.8)))),
         },
         "risk": {
             "emergence_risk": max(0.0, min(1.0, float(risk.get("emergence_risk", 0.0)))),
         },
+        "resources": {
+            "cognitive_budget": max(
+                0.0,
+                min(1.0, float((normalized.get("resources") or {}).get("cognitive_budget", 1.0))),
+            ),
+            "attention_available": max(
+                0.0,
+                min(1.0, float((normalized.get("resources") or {}).get("attention_available", 1.0))),
+            ),
+        },
+        "reflection": {
+            "reflection_confidence": max(
+                0.0,
+                min(1.0, float((normalized.get("reflection") or {}).get("reflection_confidence", confidence))),
+            ),
+        },
+        "trace": {
+            "causal_trace_id": str((normalized.get("trace") or {}).get("causal_trace_id", f"trace-{int(normalized.get('timestamp', 0))}")),
+            "memory_reference_ids": list((normalized.get("trace") or {}).get("memory_reference_ids", [])),
+            "subsystem_authority": str((normalized.get("trace") or {}).get("subsystem_authority", "trading_brain")),
+        },
+        "model_consensus": max(0.0, min(1.0, float(normalized.get("model_consensus", confidence)))),
+        "strategy_disagreement": max(0.0, min(1.0, float(normalized.get("strategy_disagreement", 0.0)))),
+        "governance_mode": str(normalized.get("governance_mode", (governance or {}).get("governance_mode", "normal"))).lower(),
     }
 
     return out

@@ -19,9 +19,12 @@ class TradeGovernanceGate:
     """Applies constitutional and runtime safety controls before order execution."""
 
     survival_coherence_threshold: float = 0.30
+    cautious_coherence_threshold: float = 0.52
     constrained_coherence_threshold: float = 0.45
     max_uncertainty: float = 0.55
     min_agreement: float = 0.40
+    max_attention_pressure: float = 0.85
+    min_cognitive_budget: float = 0.10
 
     # Regime-aware execution caps:
     # - 0.0 means force HOLD (no new risk) for extreme instability regimes.
@@ -43,7 +46,19 @@ class TradeGovernanceGate:
         "sideways": 0.02,
     }
 
-    # pylint: disable=too-many-locals
+    def status(self) -> Dict[str, float]:
+        """Expose active governance thresholds for runtime observability."""
+        return {
+            "survival_coherence_threshold": self.survival_coherence_threshold,
+            "cautious_coherence_threshold": self.cautious_coherence_threshold,
+            "constrained_coherence_threshold": self.constrained_coherence_threshold,
+            "max_uncertainty": self.max_uncertainty,
+            "min_agreement": self.min_agreement,
+            "max_attention_pressure": self.max_attention_pressure,
+            "min_cognitive_budget": self.min_cognitive_budget,
+        }
+
+    # pylint: disable=too-many-locals,too-many-branches
     def evaluate(self, envelope: Dict[str, Any], is_long: bool) -> GovernanceDecision:
         signal = str(envelope.get("signal", "HOLD")).upper()
         confidence = float(envelope.get("confidence", 0.5))
@@ -55,6 +70,7 @@ class TradeGovernanceGate:
         runtime = envelope.get("runtime", {})
         execution = envelope.get("execution", {})
         risk = envelope.get("risk", {})
+        resources = envelope.get("resources", {})
 
         coherence = float(temporal.get("coherence_score", 0.7))
         agreement = float(forecast.get("agreement", confidence))
@@ -65,13 +81,24 @@ class TradeGovernanceGate:
         constitution_passed = bool(governance.get("constitution_passed", True))
         survival_mode = bool(governance.get("survival_mode", False))
         hold_only = bool(execution.get("hold_only", False))
-        runtime_mode = str(runtime.get("mode", "normal")).lower()
+        runtime_mode = str(runtime.get("mode", governance.get("governance_mode", "normal"))).lower()
+        if runtime_mode == "constrained":
+            runtime_mode = "cautious"
+
+        model_consensus = float(envelope.get("model_consensus", agreement))
+        strategy_disagreement = float(envelope.get("strategy_disagreement", 0.0))
+        attention_pressure = float(runtime.get("attention_pressure", 0.2))
+        runtime_health = float(runtime.get("runtime_health", 0.8))
+        cognitive_budget = float(resources.get("cognitive_budget", 1.0))
+        attention_available = float(resources.get("attention_available", 1.0))
 
         reasons: List[str] = []
         overrides: Dict[str, Any] = {
             "position_multiplier": 1.0,
             "max_position_size": float(execution.get("max_position_size", 0.02)),
             "runtime_mode": runtime_mode,
+            "governance_mode": runtime_mode,
+            "required_consensus": self.min_agreement,
         }
 
         if not constitution_passed:
@@ -83,13 +110,39 @@ class TradeGovernanceGate:
         if hold_only or signal == "HOLD":
             reasons.append("hold_only")
 
-        if survival_mode or runtime_mode == "survival" or coherence < self.survival_coherence_threshold:
+        if strategy_disagreement > 0.70:
+            reasons.append("high_strategy_disagreement")
+            overrides["position_multiplier"] *= 0.5
+
+        if model_consensus < self.min_agreement:
+            reasons.append("model_consensus_too_low")
+
+        if attention_pressure >= self.max_attention_pressure:
+            reasons.append("attention_saturation")
+            overrides["position_multiplier"] *= 0.5
+            overrides["runtime_mode"] = "cautious"
+
+        if cognitive_budget <= self.min_cognitive_budget or attention_available <= self.min_cognitive_budget:
+            reasons.append("insufficient_cognitive_budget")
+            overrides["position_multiplier"] *= 0.5
+            overrides["runtime_mode"] = "cautious"
+
+        if runtime_health < 0.35:
+            reasons.append("runtime_instability")
+            overrides["runtime_mode"] = "survival"
+
+        if survival_mode or runtime_mode in {"survival", "lockdown"} or coherence < self.survival_coherence_threshold:
             reasons.append("survival_mode")
             overrides["runtime_mode"] = "survival"
 
+        if coherence < self.cautious_coherence_threshold:
+            reasons.append("cautious_mode")
+            overrides["runtime_mode"] = "cautious"
+            overrides["position_multiplier"] *= 0.75
+
         if coherence < self.constrained_coherence_threshold:
             reasons.append("low_coherence")
-            overrides["runtime_mode"] = "constrained"
+            overrides["runtime_mode"] = "survival"
             overrides["position_multiplier"] *= 0.5
 
         if uncertainty > self.max_uncertainty and agreement < self.min_agreement:
@@ -113,6 +166,15 @@ class TradeGovernanceGate:
         if confidence < 0.10:
             reasons.append("confidence_too_low")
 
+        if runtime_mode == "lockdown" or str(governance.get("governance_mode", "normal")).lower() == "lockdown":
+            reasons.append("lockdown_mode")
+            overrides["runtime_mode"] = "lockdown"
+            overrides["position_multiplier"] = 0.0
+            overrides["max_position_size"] = 0.0
+
+        mode = str(overrides.get("runtime_mode", "normal")).lower()
+        overrides["governance_mode"] = mode
+
         deny_reasons = {
             "constitution_failed",
             "drawdown_limit_exceeded",
@@ -122,8 +184,9 @@ class TradeGovernanceGate:
             "regime_blocks_trading",
             "signal_direction_conflict",
             "confidence_too_low",
+            "model_consensus_too_low",
+            "lockdown_mode",
         }
         allow = not any(reason in deny_reasons for reason in reasons)
-        mode = str(overrides.get("runtime_mode", "normal"))
 
         return GovernanceDecision(allow=allow, mode=mode, reasons=reasons, overrides=overrides)

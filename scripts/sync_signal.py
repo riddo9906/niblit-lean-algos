@@ -44,8 +44,20 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
     uncertainty: float = 0.2,
     emergence_risk: float = 0.1,
     runtime_mode: str = "normal",
+    governance_mode: str = "",
     hold_only: bool = False,
     constitution_passed: bool = True,
+    attention_pressure: float = 0.2,
+    cognitive_budget: float = 1.0,
+    attention_available: float = 1.0,
+    runtime_health: float = 0.8,
+    model_consensus: float = 0.7,
+    strategy_disagreement: float = 0.2,
+    reflection_confidence: float = 0.7,
+    execution_priority: str = "normal",
+    causal_trace_id: str = "",
+    memory_reference_ids: str = "",
+    advisor_votes: Optional[Dict[str, Any]] = None,
     legacy: bool = False,
 ) -> None:
     """Write a Niblit cognitive envelope JSON to the shared signal file."""
@@ -59,8 +71,20 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
     agreement = max(0.0, min(1.0, agreement))
     uncertainty = max(0.0, min(1.0, uncertainty))
     emergence_risk = max(0.0, min(1.0, emergence_risk))
+    attention_pressure = max(0.0, min(1.0, attention_pressure))
+    cognitive_budget = max(0.0, min(1.0, cognitive_budget))
+    attention_available = max(0.0, min(1.0, attention_available))
+    runtime_health = max(0.0, min(1.0, runtime_health))
+    model_consensus = max(0.0, min(1.0, model_consensus))
+    strategy_disagreement = max(0.0, min(1.0, strategy_disagreement))
+    reflection_confidence = max(0.0, min(1.0, reflection_confidence))
 
     ts = int(time.time())
+    if not governance_mode:
+        governance_mode = runtime_mode
+    if not causal_trace_id:
+        causal_trace_id = f"manual-{ts}"
+    memory_ids = [x.strip() for x in memory_reference_ids.split(",") if x.strip()]
 
     payload: Dict[str, Any] = {
         "signal": signal,
@@ -94,6 +118,7 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
                 "risk_tier": "medium",
                 "authority": "trading_brain",
                 "survival_mode": runtime_mode == "survival",
+                "governance_mode": governance_mode,
                 "governance_stability": round(max(0.0, min(1.0, 1.0 - emergence_risk)), 4),
                 "current_drawdown_pct": 0.0,
                 "max_drawdown_pct": 0.12,
@@ -104,25 +129,44 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
                 "allow_scale_in": False,
                 "hold_only": hold_only or signal == "HOLD",
                 "runtime_stability": round(max(0.0, min(1.0, 1.0 - emergence_risk)), 4),
+                "execution_priority": execution_priority,
             },
             "world_model": {
                 "predicted_horizon": "12h",
                 "scenario": "manual_injection",
+                "forecast_uncertainty": round(uncertainty, 4),
             },
             "temporal": {
                 "epoch_id": ts,
                 "coherence_score": round(coherence, 4),
+                "epoch_alignment": "aligned",
             },
             "runtime": {
                 "mode": runtime_mode,
                 "health": "manual",
                 "instability": round(emergence_risk, 4),
+                "attention_pressure": round(attention_pressure, 4),
+                "runtime_health": round(runtime_health, 4),
             },
             "risk": {
                 "emergence_risk": round(emergence_risk, 4),
             },
+            "resources": {
+                "cognitive_budget": round(cognitive_budget, 4),
+                "attention_available": round(attention_available, 4),
+            },
+            "reflection": {
+                "reflection_confidence": round(reflection_confidence, 4),
+            },
+            "trace": {
+                "causal_trace_id": causal_trace_id,
+                "memory_reference_ids": memory_ids,
+                "subsystem_authority": "trading_brain",
+            },
+            "model_consensus": round(model_consensus, 4),
+            "strategy_disagreement": round(strategy_disagreement, 4),
             "advisors": {
-                "votes": {},
+                "votes": advisor_votes or {},
             },
         })
 
@@ -181,6 +225,10 @@ def _print_signal(payload: Dict[str, Any]) -> None:
         print(f"     Uncertainty : {float(forecast.get('uncertainty', 1.0 - conf)):.2f}")
         print(f"     Runtime     : {runtime.get('mode', 'normal')}")
         print(f"     Constitution: {governance.get('constitution_passed', True)}")
+        print(f"     Gov mode    : {governance.get('governance_mode', 'normal')}")
+        print(f"     Attention   : {float(runtime.get('attention_pressure', 0.0)):.2f}")
+        print(f"     Budget      : {float((payload.get('resources') or {}).get('cognitive_budget', 1.0)):.2f}")
+        print(f"     Trace ID    : {((payload.get('trace') or {}).get('causal_trace_id', 'n/a'))}")
 
     if ts > 0:
         print(f"     Timestamp   : {ts}  ({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))})")
@@ -233,14 +281,38 @@ def main() -> None:
                         help="Forecast uncertainty 0-1 (default: 0.2)")
     parser.add_argument("--emergence-risk", type=float, default=0.1,
                         help="Emergence risk 0-1 (default: 0.1)")
-    parser.add_argument("--runtime-mode", choices=["normal", "constrained", "survival"], default="normal",
+    parser.add_argument("--runtime-mode", choices=["normal", "constrained", "cautious", "survival", "lockdown"], default="normal",
                         help="Runtime mode (default: normal)")
+    parser.add_argument("--governance-mode", choices=["normal", "cautious", "survival", "lockdown"], default="",
+                        help="Governance mode (default: follows --runtime-mode)")
     parser.add_argument("--hold-only", action="store_true",
                         help="Set hold-only execution constraint")
     parser.add_argument("--constitution-failed", action="store_true",
                         help="Mark constitution as failed")
     parser.add_argument("--legacy", action="store_true",
                         help="Write legacy schema only (signal/confidence/regime)")
+    parser.add_argument("--attention-pressure", type=float, default=0.2,
+                        help="Runtime attention pressure 0-1 (default: 0.2)")
+    parser.add_argument("--cognitive-budget", type=float, default=1.0,
+                        help="Cognitive budget availability 0-1 (default: 1.0)")
+    parser.add_argument("--attention-available", type=float, default=1.0,
+                        help="Attention availability 0-1 (default: 1.0)")
+    parser.add_argument("--runtime-health", type=float, default=0.8,
+                        help="Runtime health score 0-1 (default: 0.8)")
+    parser.add_argument("--model-consensus", type=float, default=0.7,
+                        help="Advisor consensus score 0-1 (default: 0.7)")
+    parser.add_argument("--strategy-disagreement", type=float, default=0.2,
+                        help="Advisor disagreement score 0-1 (default: 0.2)")
+    parser.add_argument("--reflection-confidence", type=float, default=0.7,
+                        help="Reflection confidence 0-1 (default: 0.7)")
+    parser.add_argument("--execution-priority", choices=["low", "normal", "high"], default="normal",
+                        help="Execution priority (default: normal)")
+    parser.add_argument("--causal-trace-id", default="",
+                        help="Optional causal trace id")
+    parser.add_argument("--memory-reference-ids", default="",
+                        help="Comma-separated external memory reference ids")
+    parser.add_argument("--advisor-votes-json", default="",
+                        help="JSON object for advisors.votes payload")
 
     args = parser.parse_args()
 
@@ -249,6 +321,16 @@ def main() -> None:
     elif args.clear:
         clear_signal()
     else:
+        votes = {}
+        if args.advisor_votes_json:
+            try:
+                votes = json.loads(args.advisor_votes_json)
+            except json.JSONDecodeError as exc:
+                print(f"❌ Invalid --advisor-votes-json payload: {exc}")
+                sys.exit(1)
+            if not isinstance(votes, dict):
+                print("❌ --advisor-votes-json must decode to a JSON object")
+                sys.exit(1)
         write_signal(
             signal=args.signal,
             confidence=args.confidence,
@@ -264,8 +346,20 @@ def main() -> None:
             uncertainty=args.uncertainty,
             emergence_risk=args.emergence_risk,
             runtime_mode=args.runtime_mode,
+            governance_mode=args.governance_mode,
             hold_only=args.hold_only,
             constitution_passed=not args.constitution_failed,
+            attention_pressure=args.attention_pressure,
+            cognitive_budget=args.cognitive_budget,
+            attention_available=args.attention_available,
+            runtime_health=args.runtime_health,
+            model_consensus=args.model_consensus,
+            strategy_disagreement=args.strategy_disagreement,
+            reflection_confidence=args.reflection_confidence,
+            execution_priority=args.execution_priority,
+            causal_trace_id=args.causal_trace_id,
+            memory_reference_ids=args.memory_reference_ids,
+            advisor_votes=votes,
             legacy=args.legacy,
         )
 

@@ -187,8 +187,22 @@ class NiblitBridge:
                 out["risk_pct"] = float(execution.get("max_position_size", payload.get("risk_pct", 0.02)))
             else:
                 out["risk_pct"] = float(payload.get("risk_pct", 0.02))
+            runtime = payload.get("runtime", {})
+            governance = payload.get("governance", {})
+            trace = payload.get("trace", {})
+            if not isinstance(runtime, dict):
+                runtime = {}
+            if not isinstance(governance, dict):
+                governance = {}
+            if not isinstance(trace, dict):
+                trace = {}
             out["confidence"] = max(0.0, min(1.0, float(payload.get("confidence", 0.5))))
             out["timestamp"] = int(payload.get("timestamp", 0))
+            out["runtime_mode"] = str(runtime.get("mode", governance.get("governance_mode", "normal"))).lower()
+            out["governance_mode"] = str(governance.get("governance_mode", out["runtime_mode"])).lower()
+            out["causal_trace_id"] = str(trace.get("causal_trace_id", f"trace-{out['timestamp']}"))
+            out["model_consensus"] = max(0.0, min(1.0, float(payload.get("model_consensus", out["confidence"]))))
+            out["strategy_disagreement"] = max(0.0, min(1.0, float(payload.get("strategy_disagreement", 0.0))))
             return out
 
         signal = str(payload.get("signal", "HOLD")).upper()
@@ -219,4 +233,20 @@ class NiblitBridge:
             "temporal": {
                 "coherence_score": 0.7,
             },
+            "runtime": {
+                "mode": "normal",
+                "health": "legacy",
+                "attention_pressure": 0.2,
+                "runtime_health": 0.8,
+            },
+            "trace": {
+                "causal_trace_id": f"legacy-{ts}",
+                "memory_reference_ids": [],
+                "subsystem_authority": "legacy_signal_bridge",
+            },
+            "model_consensus": confidence,
+            "strategy_disagreement": 0.0,
+            "runtime_mode": "normal",
+            "governance_mode": "normal",
+            "causal_trace_id": f"legacy-{ts}",
         }

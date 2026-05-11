@@ -11,12 +11,14 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
+    from .advisor_protocol import summarize_debate
     from .cognitive_envelope import read_envelope_file
     from .trade_governance import TradeGovernanceGate
 except ImportError:
+    from advisor_protocol import summarize_debate
     from cognitive_envelope import read_envelope_file
     from trade_governance import TradeGovernanceGate
 
@@ -56,6 +58,15 @@ class NiblitSignalMixin:
             )
             gate.constrained_coherence_threshold = float(
                 os.environ.get("NIBLIT_CONSTRAINED_COHERENCE", gate.constrained_coherence_threshold)
+            )
+            gate.cautious_coherence_threshold = float(
+                os.environ.get("NIBLIT_CAUTIOUS_COHERENCE", gate.cautious_coherence_threshold)
+            )
+            gate.max_attention_pressure = float(
+                os.environ.get("NIBLIT_MAX_ATTENTION_PRESSURE", gate.max_attention_pressure)
+            )
+            gate.min_cognitive_budget = float(
+                os.environ.get("NIBLIT_MIN_COGNITIVE_BUDGET", gate.min_cognitive_budget)
             )
             self.__niblit_gate = gate
         return self.__niblit_gate
@@ -99,18 +110,33 @@ class NiblitSignalMixin:
         if envelope is None:
             return True
 
+        debate = summarize_debate(envelope)
+        envelope["model_consensus"] = debate.model_consensus
+        envelope["strategy_disagreement"] = debate.strategy_disagreement
+        if debate.direction in {"BUY", "SELL"}:
+            envelope["forecast_consensus"]["direction"] = "UP" if debate.direction == "BUY" else "DOWN"
+
         confidence = float(envelope.get("confidence", 0.5))
         if confidence < self.niblit_min_conf:
             self._niblit_set_decision(
                 allow=False,
                 reasons=["confidence_below_min_conf"],
-                overrides={"position_multiplier": 0.0},
+                overrides={
+                    "position_multiplier": 0.0,
+                    "debate_vote_count": debate.vote_count,
+                    "model_consensus": debate.model_consensus,
+                    "strategy_disagreement": debate.strategy_disagreement,
+                },
                 mode="constrained",
             )
             self._log_governance_decision(pair)
             return False
 
         decision = self._niblit_gate().evaluate(envelope, is_long=is_long)
+        decision.overrides["debate_vote_count"] = debate.vote_count
+        decision.overrides["debate_coalition"] = debate.coalition
+        decision.overrides["model_consensus"] = debate.model_consensus
+        decision.overrides["strategy_disagreement"] = debate.strategy_disagreement
         self._niblit_set_decision(
             allow=decision.allow,
             reasons=decision.reasons,
@@ -125,9 +151,12 @@ class NiblitSignalMixin:
         envelope = self._niblit_read()
         if envelope is None:
             return False
+        debate = summarize_debate(envelope)
+        envelope["model_consensus"] = debate.model_consensus
+        envelope["strategy_disagreement"] = debate.strategy_disagreement
         decision = self._niblit_gate().evaluate(envelope, is_long=is_long)
         return (not decision.allow) and any(
-            reason in {"survival_mode", "hold_only", "regime_blocks_trading"}
+            reason in {"survival_mode", "hold_only", "regime_blocks_trading", "lockdown_mode"}
             for reason in decision.reasons
         )
 
@@ -162,6 +191,14 @@ class NiblitSignalMixin:
         runtime_stability = float(execution.get("runtime_stability", 0.8))
         governance_stability = float(governance.get("governance_stability", 0.8))
         emergence_risk = float(risk.get("emergence_risk", 0.0))
+        runtime = envelope.get("runtime", {})
+        resources = envelope.get("resources", {})
+        attention_pressure = float(runtime.get("attention_pressure", 0.2))
+        cognitive_budget = float(resources.get("cognitive_budget", 1.0))
+        attention_available = float(resources.get("attention_available", 1.0))
+        debate = summarize_debate(envelope)
+        envelope["model_consensus"] = debate.model_consensus
+        envelope["strategy_disagreement"] = debate.strategy_disagreement
 
         decision = self._niblit_gate().evaluate(envelope, is_long=(side == "long"))
         self._niblit_set_decision(
@@ -185,6 +222,11 @@ class NiblitSignalMixin:
             runtime_stability=runtime_stability,
             governance_stability=governance_stability,
             emergence_risk=emergence_risk,
+            attention_pressure=attention_pressure,
+            cognitive_budget=cognitive_budget,
+            attention_available=attention_available,
+            model_consensus=debate.model_consensus,
+            disagreement=debate.strategy_disagreement,
         )
 
         position_multiplier = float(decision.overrides.get("position_multiplier", 1.0))
@@ -214,6 +256,11 @@ class NiblitSignalMixin:
         runtime_stability: float,
         governance_stability: float,
         emergence_risk: float,
+        attention_pressure: float,
+        cognitive_budget: float,
+        attention_available: float,
+        model_consensus: float,
+        disagreement: float,
     ) -> float:
         ts = int(envelope.get("timestamp", 0))
         cache = getattr(self, "_niblit_health_cache", None)
@@ -227,6 +274,11 @@ class NiblitSignalMixin:
             * (runtime_stability ** self.niblit_weight_runtime_stability)
             * (governance_stability ** self.niblit_weight_governance_stability)
             * (max(0.0, 1.0 - emergence_risk) ** self.niblit_weight_emergence_inverse)
+            * max(0.0, min(1.0, 1.0 - attention_pressure))
+            * max(0.0, min(1.0, cognitive_budget))
+            * max(0.0, min(1.0, attention_available))
+            * max(0.0, min(1.0, model_consensus))
+            * max(0.0, min(1.0, 1.0 - disagreement))
         )
         # Keep a small configurable floor to avoid accidental zero sizing from
         # one noisy factor while still keeping sizing strongly defensive.
@@ -259,15 +311,20 @@ class NiblitSignalMixin:
     def _niblit_set_decision(
         self,
         allow: bool,
-        reasons,
+        reasons: List[str],
         overrides: Optional[Dict[str, Any]],
         mode: str,
     ) -> None:
+        envelope = self._niblit_read() or {}
+        trace = envelope.get("trace", {}) if isinstance(envelope.get("trace"), dict) else {}
+        temporal = envelope.get("temporal", {}) if isinstance(envelope.get("temporal"), dict) else {}
         self._niblit_last_decision = {
             "allow": bool(allow),
             "reasons": list(reasons or []),
             "overrides": dict(overrides or {}),
             "mode": mode,
+            "causal_trace_id": trace.get("causal_trace_id"),
+            "epoch_id": temporal.get("epoch_id"),
             "timestamp": int(time.time()),
         }
 
@@ -284,3 +341,13 @@ class NiblitSignalMixin:
             "overrides": decision.get("overrides", {}),
         }
         logger.info("niblit_governance=%s", log_payload)
+
+    def niblit_status(self) -> Dict[str, Any]:
+        """Expose current envelope + decision + gate thresholds for observability."""
+        return {
+            "runtime_mode": self.niblit_runtime_mode(),
+            "regime": self.niblit_regime(),
+            "confidence": self.niblit_confidence(),
+            "decision": getattr(self, "_niblit_last_decision", {}),
+            "gate": self._niblit_gate().status(),
+        }

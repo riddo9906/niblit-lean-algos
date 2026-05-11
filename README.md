@@ -51,7 +51,10 @@ niblit-lean-algos/
 │   ├── RsiMeanReversion.py        # RSI oversold/overbought + EMA trend
 │   ├── BollingerSqueeze.py        # Bollinger Band squeeze breakout
 │   ├── SupertrendAtr.py           # Supertrend ATR flip
-│   └── NiblitAiMaster.py          # Flagship: 70% AI + 30% internal signal
+│   ├── advisor_protocol.py        # Advisor vote normalization + debate consensus
+│   ├── trade_governance.py        # Governance gate + runtime mode enforcement
+│   ├── cognitive_envelope.py      # Envelope normalization + legacy bridge
+│   └── NiblitAiMaster.py          # Flagship governed execution strategy
 │
 ├── configs/                       # ← NEW: Freqtrade configuration files
 │   ├── freqtrade_config_binance.json      # Live trading config
@@ -166,9 +169,9 @@ python scripts/ft_live.py balance
 | **RsiMeanReversion** | RSI oversold + EMA50/200 uptrend filter | -3% | ❌ | RSI period + thresholds | ✅ |
 | **BollingerSqueeze** | BB squeeze release + bullish momentum | -3% | ❌ | BB std, Keltner multiplier | ✅ |
 | **SupertrendAtr** | Supertrend bullish flip + ATR | -5% | ❌ | ST period + multiplier | ✅ |
-| **NiblitAiMaster** | 70% Niblit AI + 30% EMA/RSI | -3% | ❌ | None (regime-driven) | ✅ |
+| **NiblitAiMaster** | Advisor-driven indicators + centralized governance gate | -3% | ❌ | None (envelope-driven) | ✅ |
 
-All strategies use **`INTERFACE_VERSION = 3`**, `timeframe = "1h"`, and include `confirm_trade_entry()` for Niblit AI veto.
+All strategies use **`INTERFACE_VERSION = 3`**, `timeframe = "1h"`, and include `confirm_trade_entry()` routing through centralized `TradeGovernanceGate` checks.
 
 ---
 
@@ -210,8 +213,10 @@ The mixin reads a JSON signal file written by Niblit's TradingBrain:
 **In live / dry-run mode:**
 - `confirm_trade_entry()` calls the `TradeGovernanceGate` through `niblit_allow_entry(pair, is_long)`
 - Constitutional, coherence, uncertainty/consensus, drawdown, survival mode, and regime constraints are enforced pre-trade
-- Adaptive position size is centralized in `NiblitSignalMixin.custom_stake_amount()` from confidence × coherence × agreement × runtime stability × governance stability × (1 - emergence risk)
+- Advisor votes are normalized into consensus/disagreement values through `advisor_protocol.summarize_debate()`
+- Adaptive position size is centralized in `NiblitSignalMixin.custom_stake_amount()` from confidence × coherence × agreement × runtime stability × governance stability × (1 - emergence risk) × attention/budget factors × disagreement inverse
 - Rich regime identities (e.g. `volatile_breakout`, `liquidity_trap`, `panic_capitulation`, `news_driven_instability`) map to automatic execution caps or holds
+- Runtime governance modes are explicit: `normal`, `cautious`, `survival`, `lockdown`
 - `NiblitAiMaster` emits reflection telemetry and market episode events as JSONL sidecars for external memory ingestion
 
 **In backtesting mode:**
@@ -288,7 +293,16 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `NIBLIT_EPISODES_FILE` | `/tmp/niblit_market_episodes.jsonl` | Market episode events (JSONL) |
 | `NIBLIT_SURVIVAL_COHERENCE` | `0.30` | Coherence threshold triggering survival-mode block |
 | `NIBLIT_CONSTRAINED_COHERENCE` | `0.45` | Coherence threshold triggering constrained sizing |
+| `NIBLIT_CAUTIOUS_COHERENCE` | `0.52` | Coherence threshold triggering cautious mode |
+| `NIBLIT_MAX_ATTENTION_PRESSURE` | `0.85` | Attention pressure threshold triggering cautious mode |
+| `NIBLIT_MIN_COGNITIVE_BUDGET` | `0.10` | Minimum cognitive budget before governance throttles stake |
 | `NIBLIT_MIN_HEALTH_MULTIPLIER` | `0.05` | Floor for adaptive sizing multiplier under degraded cognition |
+| `NIBLIT_WEIGHT_CONFIDENCE` | `1.0` | Exponent weight for confidence in adaptive sizing |
+| `NIBLIT_WEIGHT_COHERENCE` | `1.0` | Exponent weight for coherence in adaptive sizing |
+| `NIBLIT_WEIGHT_AGREEMENT` | `1.0` | Exponent weight for consensus agreement in adaptive sizing |
+| `NIBLIT_WEIGHT_RUNTIME_STABILITY` | `1.0` | Exponent weight for runtime stability in adaptive sizing |
+| `NIBLIT_WEIGHT_GOVERNANCE_STABILITY` | `1.0` | Exponent weight for governance stability in adaptive sizing |
+| `NIBLIT_WEIGHT_EMERGENCE_INVERSE` | `1.0` | Exponent weight for inverse emergence risk in adaptive sizing |
 
 Copy `.env.example` to `.env` and fill in values before running locally.
 

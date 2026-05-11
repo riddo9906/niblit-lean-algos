@@ -1,7 +1,7 @@
 """
 Niblit AI Master — Freqtrade flagship strategy.
 
-Entry logic (all must align for a long):
+Advisor entry logic (all must align for a long signal contribution):
   1. Long-term trend:   close > EMA200     (macro bull filter)
   2. Medium trend:      close > EMA50      (intermediate trend)
   3. Short-term signal: EMA9 > EMA21       (fast crossover)
@@ -18,9 +18,9 @@ Custom exits (live + backtest):
   - Profit protection: if up >1% and EMA9 turns bearish   → lock in gains
 
 Niblit AI role (live only):
-  - BUY regime with conf>min_conf: AI-vetoed entries are blocked and logged
-  - ranging/sideways regime: position size halved
-  - volatile/crash/bear: entry blocked, open positions force-exited
+  - Strategy contributes directional advice only.
+  - Final execution authority is delegated to NiblitSignalMixin + TradeGovernanceGate.
+  - Runtime governance modes (normal/cautious/survival/lockdown) can veto, resize, or force exits.
 
 Timeframe: 1h (crypto, Binance).
 """
@@ -240,6 +240,9 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
             temporal = envelope.get("temporal", {})
             forecast = envelope.get("forecast_consensus", {})
             runtime = envelope.get("runtime", {})
+            resources = envelope.get("resources", {})
+            reflection = envelope.get("reflection", {})
+            trace = envelope.get("trace", {})
 
             results = {
                 "source":      "freqtrade",
@@ -256,6 +259,17 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                 "forecast_uncertainty": forecast.get("uncertainty", 1.0),
                 "governance_authority": governance.get("authority", "unknown"),
                 "governance_constitution_passed": governance.get("constitution_passed", True),
+                "governance_mode": governance.get("governance_mode", runtime.get("mode", "normal")),
+                "attention_pressure": runtime.get("attention_pressure", 0.0),
+                "runtime_health": runtime.get("runtime_health", 0.8),
+                "cognitive_budget": resources.get("cognitive_budget", 1.0),
+                "attention_available": resources.get("attention_available", 1.0),
+                "model_consensus": envelope.get("model_consensus", forecast.get("agreement", 0.0)),
+                "strategy_disagreement": envelope.get("strategy_disagreement", 0.0),
+                "reflection_confidence": reflection.get("reflection_confidence", self.niblit_confidence()),
+                "causal_trace_id": trace.get("causal_trace_id"),
+                "epoch_id": temporal.get("epoch_id"),
+                "epoch_alignment": temporal.get("epoch_alignment", "aligned"),
                 "governance_decision": snapshot.get("decision", {}),
                 "envelope_schema_version": envelope.get("schema_version", "unknown"),
             }
@@ -277,6 +291,14 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
             "forecast_agreement": results.get("forecast_agreement"),
             "forecast_uncertainty": results.get("forecast_uncertainty"),
             "runtime_mode": results.get("runtime_mode"),
+            "governance_mode": results.get("governance_mode"),
+            "attention_pressure": results.get("attention_pressure"),
+            "runtime_health": results.get("runtime_health"),
+            "model_consensus": results.get("model_consensus"),
+            "strategy_disagreement": results.get("strategy_disagreement"),
+            "reflection_confidence": results.get("reflection_confidence"),
+            "causal_trace_id": results.get("causal_trace_id"),
+            "epoch_id": results.get("epoch_id"),
             "total_pnl": results.get("total_pnl"),
             "trade_count": results.get("trade_count"),
             "win_count": results.get("win_count"),
@@ -299,6 +321,12 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
             "advisor_votes": advisors.get("votes", {}),
             "governance_authority": governance.get("authority", "unknown"),
             "governance_constitution_passed": governance.get("constitution_passed", True),
+            "governance_mode": governance.get("governance_mode", "normal"),
+            "model_consensus": envelope.get("model_consensus", 0.0),
+            "strategy_disagreement": envelope.get("strategy_disagreement", 0.0),
+            "attention_pressure": (envelope.get("runtime") or {}).get("attention_pressure", 0.0),
+            "cognitive_budget": (envelope.get("resources") or {}).get("cognitive_budget", 1.0),
+            "causal_trace_id": (envelope.get("trace") or {}).get("causal_trace_id"),
             "realized_total_pnl": results.get("total_pnl"),
         }
         self._append_jsonl(_EPISODES_FILE, episode)
