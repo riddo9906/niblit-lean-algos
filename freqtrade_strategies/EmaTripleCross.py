@@ -72,7 +72,4 @@ class EmaTripleCross(NiblitSignalMixin, IStrategy):
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float,
                             rate: float, time_in_force: str, current_time,
                             entry_tag, side: str, **kwargs) -> bool:
-        is_long = side == "long"
-        if self.niblit_block_entry(pair, is_long):
-            return False
-        return True
+        return self.niblit_allow_entry(pair, side == "long")

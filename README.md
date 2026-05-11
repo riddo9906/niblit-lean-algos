@@ -27,7 +27,7 @@ The repository hosts two generations of Niblit trading code side-by-side:
 
 ## Project Overview
 
-Niblit AI generates trading signals (BUY / SELL / HOLD) with a confidence score and market regime label. These signals are written to a JSON sidecar file. Freqtrade strategies read that file via the **`NiblitSignalMixin`** and use it to veto or weight entry/exit decisions.
+Niblit AI now publishes a versioned cognitive execution envelope (schema `2.0`) that includes signal intent, forecast consensus, governance state, execution constraints, temporal coherence, and runtime mode. Freqtrade strategies read that file via the **`NiblitSignalMixin`** and act as advisors while governed execution gates make final allow/deny and sizing decisions.
 
 - **Exchange**: Binance (spot and futures)
 - **Quote currency**: USDT
@@ -178,20 +178,39 @@ The mixin reads a JSON signal file written by Niblit's TradingBrain:
 
 ```json
 {
-  "signal":     "BUY",
+  "schema_version": "2.0",
+  "signal": "BUY",
   "confidence": 0.82,
-  "symbol":     "BTC/USDT",
-  "timestamp":  1713100000,
-  "regime":     "bullish",
-  "risk_pct":   0.02
+  "market_regime": "volatile_breakout",
+  "forecast_consensus": {
+    "direction": "UP",
+    "agreement": 0.74,
+    "uncertainty": 0.18
+  },
+  "governance": {
+    "constitution_passed": true,
+    "survival_mode": false
+  },
+  "execution": {
+    "max_position_size": 0.04,
+    "hold_only": false
+  },
+  "temporal": {
+    "coherence_score": 0.83
+  },
+  "runtime": {
+    "mode": "normal"
+  },
+  "timestamp": 1713100000
 }
 ```
 
 **In live / dry-run mode:**
-- `confirm_trade_entry()` calls `niblit_block_entry(pair, is_long)` — returns `False` (block) when Niblit contradicts the direction with confidence ≥ `NIBLIT_MIN_CONF` (default 0.55)
-- `NiblitAiMaster` additionally weights entries: combined score = 70% × Niblit + 30% × internal; threshold 0.20
-- Regime `"volatile"` / `"crash"` / `"bear"` → all entries blocked, open longs force-exited
-- Regime `"ranging"` / `"sideways"` → position size halved via `custom_stake_amount()`
+- `confirm_trade_entry()` calls the `TradeGovernanceGate` through `niblit_allow_entry(pair, is_long)`
+- Constitutional, coherence, uncertainty/consensus, drawdown, survival mode, and regime constraints are enforced pre-trade
+- Adaptive position size is centralized in `NiblitSignalMixin.custom_stake_amount()` from confidence × coherence × agreement × runtime stability × governance stability × (1 - emergence risk)
+- Rich regime identities (e.g. `volatile_breakout`, `liquidity_trap`, `panic_capitulation`, `news_driven_instability`) map to automatic execution caps or holds
+- `NiblitAiMaster` emits reflection telemetry and market episode events as JSONL sidecars for external memory ingestion
 
 **In backtesting mode:**
 - Signal file is absent → `_niblit_read()` returns `None` → all helpers return neutral values
@@ -203,6 +222,9 @@ export NIBLIT_SIGNAL_FILE=/path/to/niblit_lean_signal.json
 ```
 
 **Results write-back**: `NiblitAiMaster.bot_loop_start()` writes `niblit_ft_results.json` so Niblit can observe Freqtrade's performance.
+Additional telemetry files:
+- `NIBLIT_REFLECTION_FILE` (default: `/tmp/niblit_trade_reflection.jsonl`)
+- `NIBLIT_EPISODES_FILE` (default: `/tmp/niblit_market_episodes.jsonl`)
 
 ### MRO usage
 
@@ -256,10 +278,14 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `FT_API_PASS` | — | Freqtrade REST API password |
 | `TELEGRAM_TOKEN` | — | Telegram bot token for notifications |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
-| `NIBLIT_SIGNAL_FILE` | `/tmp/niblit_lean_signal.json` | Path to Niblit signal JSON |
+| `NIBLIT_SIGNAL_FILE` | `/tmp/niblit_lean_signal.json` | Path to Niblit cognitive envelope JSON |
 | `NIBLIT_SIGNAL_MAX_AGE` | `300` | Max signal age in seconds before stale |
 | `NIBLIT_MIN_CONF` | `0.55` | Min Niblit confidence to trigger veto |
 | `NIBLIT_RESULTS_FILE` | `/tmp/niblit_ft_results.json` | Freqtrade → Niblit results path |
+| `NIBLIT_REFLECTION_FILE` | `/tmp/niblit_trade_reflection.jsonl` | Trade reflection events (JSONL) |
+| `NIBLIT_EPISODES_FILE` | `/tmp/niblit_market_episodes.jsonl` | Market episode events (JSONL) |
+| `NIBLIT_SURVIVAL_COHERENCE` | `0.30` | Coherence threshold triggering survival-mode block |
+| `NIBLIT_CONSTRAINED_COHERENCE` | `0.45` | Coherence threshold triggering constrained sizing |
 
 Copy `.env.example` to `.env` and fill in values before running locally.
 

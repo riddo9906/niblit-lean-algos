@@ -34,7 +34,7 @@ from typing import Optional
 
 import pandas as pd
 import pandas_ta as ta  # type: ignore
-from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
+from freqtrade.strategy import IStrategy, IntParameter
 
 try:
     from .NiblitSignalMixin import NiblitSignalMixin
@@ -43,12 +43,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-_NIBLIT_WEIGHT   = 0.70
-_INTERNAL_WEIGHT = 0.30
-_DEFAULT_RISK    = 0.02
 _RESULTS_FILE = os.environ.get(
     "NIBLIT_RESULTS_FILE",
     os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_ft_results.json"),
+)
+_REFLECTION_FILE = os.environ.get(
+    "NIBLIT_REFLECTION_FILE",
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_trade_reflection.jsonl"),
+)
+_EPISODES_FILE = os.environ.get(
+    "NIBLIT_EPISODES_FILE",
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_market_episodes.jsonl"),
 )
 
 
@@ -92,6 +97,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
         self._trade_count: int   = 0
         self._win_count:   int   = 0
         self._total_pnl:   float = 0.0
+        self._last_regime: str = "unknown"
 
     # ── indicators ────────────────────────────────────────────────────────
 
@@ -167,48 +173,24 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float,
                             rate: float, time_in_force: str, current_time,
                             entry_tag, side: str, **kwargs) -> bool:
-        sig    = self.niblit_signal()
-        conf   = self.niblit_confidence()
-        regime = self.niblit_regime()
-        is_long = side == "long"
-
-        # Regime block — dangerous market conditions
-        if regime in ("volatile", "crash", "bear"):
-            logger.info("NiblitAiMaster: blocking entry — regime=%s pair=%s", regime, pair)
-            return False
-
-        # Niblit AI veto — only applied when a live signal is available
-        if sig is not None:
-            niblit_score = (1.0 if sig == "BUY" else -1.0 if sig == "SELL" else 0.0) * conf
-            combined     = _NIBLIT_WEIGHT * niblit_score + _INTERNAL_WEIGHT * (1.0 if is_long else -1.0)
-            threshold    = 0.20
-            if is_long and combined < threshold:
-                logger.info(
-                    "NiblitAiMaster: AI veto LONG — pair=%s sig=%s conf=%.2f combined=%.2f",
-                    pair, sig, conf, combined,
-                )
-                return False
-            if not is_long and combined > -threshold:
-                logger.info(
-                    "NiblitAiMaster: AI veto SHORT — pair=%s sig=%s conf=%.2f combined=%.2f",
-                    pair, sig, conf, combined,
-                )
-                return False
-            logger.debug(
-                "NiblitAiMaster: AI accept %s — pair=%s sig=%s conf=%.2f combined=%.2f",
-                side, pair, sig, conf, combined,
-            )
-
-        return True
+        return self.niblit_allow_entry(pair, side == "long")
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float],
                             max_stake: float, leverage: float,
                             entry_tag: Optional[str], side: str, **kwargs) -> float:
-        regime = self.niblit_regime()
-        if regime in ("ranging", "sideways"):
-            proposed_stake *= 0.5
-        return max(proposed_stake, min_stake or 0)
+        return super().custom_stake_amount(
+            pair=pair,
+            current_time=current_time,
+            current_rate=current_rate,
+            proposed_stake=proposed_stake,
+            min_stake=min_stake,
+            max_stake=max_stake,
+            leverage=leverage,
+            entry_tag=entry_tag,
+            side=side,
+            **kwargs,
+        )
 
     def custom_exit(self, pair: str, trade, current_time: datetime,
                     current_rate: float, current_profit: float,
@@ -216,11 +198,11 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
         """Regime-based force-exit and profit-protection early exit."""
         is_long = not getattr(trade, "is_short", False)
 
-        # Force-exit on dangerous regime (live only; no-op in backtesting)
-        regime = self.niblit_regime()
-        if is_long and regime in ("volatile", "crash", "bear"):
-            logger.info("NiblitAiMaster: force-exit long — regime=%s pair=%s", regime, pair)
-            return f"regime_{regime}"
+        if is_long and self.niblit_should_force_exit(is_long=True):
+            decision = getattr(self, "_niblit_last_decision", {})
+            mode = decision.get("mode", "constrained")
+            logger.info("NiblitAiMaster: force-exit long — governance_mode=%s pair=%s", mode, pair)
+            return f"governance_{mode}"
 
         # Profit protection: if we're up and the fast EMA has turned against us, exit early
         # rather than waiting for the full trailing stop to fire.
@@ -252,6 +234,13 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     def bot_loop_start(self, current_time: datetime, **kwargs) -> None:
         """Periodically persist performance metrics so Niblit can read them."""
         try:
+            snapshot = self.niblit_execution_snapshot()
+            envelope = snapshot.get("envelope", {})
+            governance = envelope.get("governance", {})
+            temporal = envelope.get("temporal", {})
+            forecast = envelope.get("forecast_consensus", {})
+            runtime = envelope.get("runtime", {})
+
             results = {
                 "source":      "freqtrade",
                 "trade_count": getattr(self, "_trade_count", 0),
@@ -261,8 +250,64 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                 "niblit_signal":   self.niblit_signal(),
                 "niblit_regime":   self.niblit_regime(),
                 "niblit_conf":     self.niblit_confidence(),
+                "runtime_mode": runtime.get("mode", "normal"),
+                "coherence_score": temporal.get("coherence_score", 0.0),
+                "forecast_agreement": forecast.get("agreement", 0.0),
+                "forecast_uncertainty": forecast.get("uncertainty", 1.0),
+                "governance_authority": governance.get("authority", "unknown"),
+                "governance_constitution_passed": governance.get("constitution_passed", True),
+                "governance_decision": snapshot.get("decision", {}),
+                "envelope_schema_version": envelope.get("schema_version", "unknown"),
             }
             with open(_RESULTS_FILE, "w", encoding="utf-8") as fh:
                 json.dump(results, fh, indent=2)
+            self._emit_reflection_event(results)
+            self._emit_regime_episode(results)
         except (OSError, ValueError, TypeError) as exc:
             logger.warning("Could not write results file: %s", exc)
+
+    def _emit_reflection_event(self, results: dict) -> None:
+        event = {
+            "event": "trade_reflection",
+            "timestamp": results.get("timestamp"),
+            "decision": results.get("governance_decision", {}),
+            "regime": results.get("niblit_regime"),
+            "confidence": results.get("niblit_conf"),
+            "coherence": results.get("coherence_score"),
+            "forecast_agreement": results.get("forecast_agreement"),
+            "forecast_uncertainty": results.get("forecast_uncertainty"),
+            "runtime_mode": results.get("runtime_mode"),
+            "total_pnl": results.get("total_pnl"),
+            "trade_count": results.get("trade_count"),
+            "win_count": results.get("win_count"),
+        }
+        self._append_jsonl(_REFLECTION_FILE, event)
+
+    def _emit_regime_episode(self, results: dict) -> None:
+        regime = str(results.get("niblit_regime", "unknown"))
+        if regime == self._last_regime:
+            return
+        self._last_regime = regime
+        envelope = self.niblit_envelope() or {}
+        advisors = envelope.get("advisors", {})
+        governance = envelope.get("governance", {})
+        episode = {
+            "event": "market_episode",
+            "timestamp": results.get("timestamp"),
+            "regime": regime,
+            "scenario": envelope.get("world_model", {}).get("scenario", "unknown"),
+            "advisor_votes": advisors.get("votes", {}),
+            "governance_authority": governance.get("authority", "unknown"),
+            "governance_constitution_passed": governance.get("constitution_passed", True),
+            "realized_total_pnl": results.get("total_pnl"),
+        }
+        self._append_jsonl(_EPISODES_FILE, episode)
+
+    @staticmethod
+    def _append_jsonl(path: str, payload: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload) + "\n")
+        except (OSError, ValueError, TypeError):
+            logger.debug("Unable to append event file at %s", path)
