@@ -36,7 +36,7 @@ _MAX_SIGNAL_AGE_SECS: int = int(os.environ.get("NIBLIT_SIGNAL_MAX_AGE", "300"))
 _NIBLIT_MIN_CONF: float = float(os.environ.get("NIBLIT_MIN_CONF", "0.55"))
 _TRACE_FILE: str = os.environ.get(
     "NIBLIT_TRACE_FILE",
-    os.path.join(os.getcwd(), "runtime_traces", "execution_trace.jsonl"),
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "runtime_traces", "execution_trace.jsonl"),
 )
 
 

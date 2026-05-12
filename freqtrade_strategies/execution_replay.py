@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 _TRACE_FILE: str = os.environ.get(
     "NIBLIT_TRACE_FILE",
-    os.path.join(os.getcwd(), "runtime_traces", "execution_trace.jsonl"),
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "runtime_traces", "execution_trace.jsonl"),
 )
 
 TRACE_SCHEMA_VERSION = "1.0"
