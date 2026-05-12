@@ -36,7 +36,7 @@ _MAX_SIGNAL_AGE_SECS: int = int(os.environ.get("NIBLIT_SIGNAL_MAX_AGE", "300"))
 _NIBLIT_MIN_CONF: float = float(os.environ.get("NIBLIT_MIN_CONF", "0.55"))
 _TRACE_FILE: str = os.environ.get(
     "NIBLIT_TRACE_FILE",
-    os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_execution_trace.jsonl"),
+    os.path.join(os.getcwd(), "runtime_traces", "execution_trace.jsonl"),
 )
 
 
@@ -203,6 +203,23 @@ class NiblitSignalMixin:
         envelope["model_consensus"] = debate.model_consensus
         envelope["strategy_disagreement"] = debate.strategy_disagreement
         decision = self._niblit_gate().evaluate(envelope, is_long=is_long)
+        self._niblit_replay().record_exit_decision(
+            pair="*",
+            envelope=envelope,
+            governance_decision={
+                "allow": decision.allow,
+                "mode": decision.mode,
+                "reasons": decision.reasons,
+                "overrides": decision.overrides,
+            },
+            consensus_state={
+                "model_consensus": debate.model_consensus,
+                "strategy_disagreement": debate.strategy_disagreement,
+                "coalition": debate.coalition,
+                "vote_count": debate.vote_count,
+                "direction": debate.direction,
+            },
+        )
         return (not decision.allow) and any(
             reason in {"survival_mode", "hold_only", "regime_blocks_trading", "lockdown_mode"}
             for reason in decision.reasons
@@ -226,6 +243,7 @@ class NiblitSignalMixin:
         envelope = self._niblit_read()
         if envelope is None:
             return max(proposed_stake, min_stake or 0)
+        envelope = self._niblit_enrich_envelope(envelope)
 
         governance = envelope.get("governance", {})
         forecast = envelope.get("forecast_consensus", {})
@@ -257,6 +275,23 @@ class NiblitSignalMixin:
         )
 
         if not decision.allow:
+            self._niblit_replay().record_sizing_decision(
+                pair=pair,
+                envelope=envelope,
+                governance_decision={
+                    "allow": decision.allow,
+                    "mode": decision.mode,
+                    "reasons": decision.reasons,
+                    "overrides": decision.overrides,
+                },
+                consensus_state={
+                    "model_consensus": debate.model_consensus,
+                    "strategy_disagreement": debate.strategy_disagreement,
+                    "coalition": debate.coalition,
+                    "vote_count": debate.vote_count,
+                    "direction": debate.direction,
+                },
+            )
             return min_stake or 0
 
         # Multiplicative blend intentionally suppresses size when any cognition
@@ -292,6 +327,23 @@ class NiblitSignalMixin:
         if min_stake is not None:
             sized = max(sized, min_stake)
 
+        self._niblit_replay().record_sizing_decision(
+            pair=pair,
+            envelope=envelope,
+            governance_decision={
+                "allow": decision.allow,
+                "mode": decision.mode,
+                "reasons": decision.reasons,
+                "overrides": {**decision.overrides, "final_stake_amount": sized},
+            },
+            consensus_state={
+                "model_consensus": debate.model_consensus,
+                "strategy_disagreement": debate.strategy_disagreement,
+                "coalition": debate.coalition,
+                "vote_count": debate.vote_count,
+                "direction": debate.direction,
+            },
+        )
         return max(0.0, sized)
 
     # pylint: disable=too-many-arguments
@@ -349,7 +401,7 @@ class NiblitSignalMixin:
         return value
 
     def niblit_execution_snapshot(self) -> Dict[str, Any]:
-        envelope = self._niblit_read() or {}
+        envelope = self._niblit_enrich_envelope(self._niblit_read()) or {}
         return {
             "envelope": envelope,
             "decision": getattr(self, "_niblit_last_decision", {}),
@@ -412,4 +464,6 @@ class NiblitSignalMixin:
             "confidence": self.niblit_confidence(),
             "decision": getattr(self, "_niblit_last_decision", {}),
             "gate": self._niblit_gate().status(),
+            "adapter": self._niblit_adapter().status(),
+            "replay": self._niblit_replay().status(),
         }

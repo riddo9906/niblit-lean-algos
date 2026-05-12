@@ -24,6 +24,10 @@ class CognitiveEnvelopeTests(unittest.TestCase):
         self.assertIn("resources", out)
         self.assertIn("trace", out)
         self.assertIn("model_consensus", out)
+        self.assertIn("coherence_drift", out)
+        self.assertIn("model_trust", out)
+        self.assertIn("execution_risk", out)
+        self.assertIn("runtime_pressure", out["runtime"])
 
     def test_stale_envelope_rejected(self):
         stale = {

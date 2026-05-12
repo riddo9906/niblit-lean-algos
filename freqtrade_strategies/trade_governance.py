@@ -24,7 +24,10 @@ class TradeGovernanceGate:
     max_uncertainty: float = 0.55
     min_agreement: float = 0.40
     max_attention_pressure: float = 0.85
+    max_runtime_pressure: float = 0.80
     min_cognitive_budget: float = 0.10
+    max_coherence_drift: float = 0.20
+    min_model_trust: float = 0.35
 
     # Regime-aware execution caps:
     # - 0.0 means force HOLD (no new risk) for extreme instability regimes.
@@ -55,7 +58,10 @@ class TradeGovernanceGate:
             "max_uncertainty": self.max_uncertainty,
             "min_agreement": self.min_agreement,
             "max_attention_pressure": self.max_attention_pressure,
+            "max_runtime_pressure": self.max_runtime_pressure,
             "min_cognitive_budget": self.min_cognitive_budget,
+            "max_coherence_drift": self.max_coherence_drift,
+            "min_model_trust": self.min_model_trust,
         }
 
     # pylint: disable=too-many-locals,too-many-branches
@@ -90,6 +96,11 @@ class TradeGovernanceGate:
         strategy_disagreement = float(envelope.get("strategy_disagreement", 0.0))
         attention_pressure = float(runtime.get("attention_pressure", 0.2))
         runtime_health = float(runtime.get("runtime_health", 0.8))
+        runtime_pressure = float(runtime.get("runtime_pressure", (attention_pressure + float(runtime.get("instability", 0.0))) / 2.0))
+        coherence_drift = float(envelope.get("coherence_drift", 0.0))
+        governance_confidence = float(envelope.get("governance_confidence", (float(governance.get("governance_stability", 0.8)) + confidence) / 2.0))
+        model_trust = float(envelope.get("model_trust", confidence))
+        execution_risk = float(envelope.get("execution_risk", emergence_risk))
         cognitive_budget = float(resources.get("cognitive_budget", 1.0))
         attention_available = float(resources.get("attention_available", 1.0))
 
@@ -100,6 +111,10 @@ class TradeGovernanceGate:
             "runtime_mode": runtime_mode,
             "governance_mode": runtime_mode,
             "required_consensus": self.min_agreement,
+            "runtime_pressure": runtime_pressure,
+            "coherence_drift": coherence_drift,
+            "model_trust": model_trust,
+            "execution_risk": execution_risk,
         }
 
         if not constitution_passed:
@@ -115,12 +130,30 @@ class TradeGovernanceGate:
             reasons.append("high_strategy_disagreement")
             overrides["position_multiplier"] *= 0.5
 
+        if governance_confidence < self.min_agreement:
+            reasons.append("governance_confidence_too_low")
+            overrides["position_multiplier"] *= 0.6
+
         if model_consensus < self.min_agreement:
             reasons.append("model_consensus_too_low")
+
+        if model_trust < self.min_model_trust:
+            reasons.append("model_trust_too_low")
+            overrides["position_multiplier"] *= 0.5
 
         if attention_pressure >= self.max_attention_pressure:
             reasons.append("attention_saturation")
             overrides["position_multiplier"] *= 0.5
+            overrides["runtime_mode"] = "cautious"
+
+        if runtime_pressure >= self.max_runtime_pressure:
+            reasons.append("runtime_pressure_high")
+            overrides["position_multiplier"] *= 0.5
+            overrides["runtime_mode"] = "cautious"
+
+        if coherence_drift >= self.max_coherence_drift:
+            reasons.append("coherence_drift_high")
+            overrides["position_multiplier"] *= 0.65
             overrides["runtime_mode"] = "cautious"
 
         if cognitive_budget <= self.min_cognitive_budget or attention_available <= self.min_cognitive_budget:
@@ -153,6 +186,10 @@ class TradeGovernanceGate:
             reasons.append("high_emergence_risk")
             overrides["position_multiplier"] *= 0.5
 
+        if execution_risk > 0.70:
+            reasons.append("high_execution_risk")
+            overrides["position_multiplier"] *= 0.5
+
         regime_cap = self._REGIME_POSITION_CAP.get(regime)
         if regime_cap is not None:
             overrides["max_position_size"] = min(overrides["max_position_size"], regime_cap)
@@ -166,6 +203,11 @@ class TradeGovernanceGate:
 
         if confidence < 0.10:
             reasons.append("confidence_too_low")
+        elif runtime_health < 0.50 or runtime_pressure > self.max_runtime_pressure or coherence_drift > self.max_coherence_drift:
+            adjusted_confidence = confidence * max(0.25, runtime_health) * max(0.4, 1.0 - coherence_drift)
+            overrides["adjusted_confidence"] = adjusted_confidence
+            if adjusted_confidence < 0.15:
+                reasons.append("confidence_decay_under_instability")
 
         if runtime_mode == "lockdown" or str(governance.get("governance_mode", "normal")).lower() == "lockdown":
             reasons.append("lockdown_mode")
@@ -185,7 +227,9 @@ class TradeGovernanceGate:
             "regime_blocks_trading",
             "signal_direction_conflict",
             "confidence_too_low",
+            "confidence_decay_under_instability",
             "model_consensus_too_low",
+            "model_trust_too_low",
             "lockdown_mode",
         }
         allow = not any(reason in deny_reasons for reason in reasons)

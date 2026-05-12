@@ -175,6 +175,7 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
             "epoch_id": int(temporal.get("epoch_id", normalized.get("epoch", normalized.get("timestamp", 0)))),
             "coherence_score": max(0.0, min(1.0, float(temporal.get("coherence_score", 0.7)))),
             "epoch_alignment": str(temporal.get("epoch_alignment", "aligned")),
+            "temporal_epoch": int(temporal.get("temporal_epoch", temporal.get("epoch_id", normalized.get("epoch", normalized.get("timestamp", 0))))),
         },
         "runtime": {
             "mode": str(runtime.get("mode", "normal")).lower(),
@@ -182,6 +183,18 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
             "instability": max(0.0, min(1.0, float(runtime.get("instability", 0.0)))),
             "attention_pressure": max(0.0, min(1.0, float(runtime.get("attention_pressure", 0.2)))),
             "runtime_health": max(0.0, min(1.0, float(runtime.get("runtime_health", 0.8)))),
+            "runtime_pressure": max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        runtime.get(
+                            "runtime_pressure",
+                            (float(runtime.get("attention_pressure", 0.2)) + float(runtime.get("instability", 0.0))) / 2.0,
+                        )
+                    ),
+                ),
+            ),
         },
         "risk": {
             "emergence_risk": max(0.0, min(1.0, float(risk.get("emergence_risk", 0.0)))),
@@ -210,6 +223,53 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         "model_consensus": max(0.0, min(1.0, float(normalized.get("model_consensus", confidence)))),
         "strategy_disagreement": max(0.0, min(1.0, float(normalized.get("strategy_disagreement", 0.0)))),
         "governance_mode": str(normalized.get("governance_mode", (governance or {}).get("governance_mode", "normal"))).lower(),
+        "coherence_drift": max(0.0, min(1.0, float(normalized.get("coherence_drift", 0.0)))),
+        "governance_confidence": max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    normalized.get(
+                        "governance_confidence",
+                        (governance.get("governance_stability", 0.8) + float(normalized.get("confidence", confidence))) / 2.0,
+                    )
+                ),
+            ),
+        ),
+        "model_trust": max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    normalized.get(
+                        "model_trust",
+                        (normalized.get("reflection") or {}).get("reflection_confidence", confidence),
+                    )
+                ),
+            ),
+        ),
+        "execution_risk": max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    normalized.get(
+                        "execution_risk",
+                        risk.get("emergence_risk", 0.0),
+                    )
+                ),
+            ),
+        ),
+        "resource_state": {
+            "cognitive_budget": max(
+                0.0,
+                min(1.0, float((normalized.get("resources") or {}).get("cognitive_budget", 1.0))),
+            ),
+            "attention_available": max(
+                0.0,
+                min(1.0, float((normalized.get("resources") or {}).get("attention_available", 1.0))),
+            ),
+        },
     }
 
     return out

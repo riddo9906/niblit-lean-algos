@@ -261,18 +261,25 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                 "governance_constitution_passed": governance.get("constitution_passed", True),
                 "governance_mode": governance.get("governance_mode", runtime.get("mode", "normal")),
                 "attention_pressure": runtime.get("attention_pressure", 0.0),
+                "runtime_pressure": runtime.get("runtime_pressure", runtime.get("attention_pressure", 0.0)),
                 "runtime_health": runtime.get("runtime_health", 0.8),
+                "model_orchestration_state": runtime.get("model_orchestration_state", "unknown"),
                 "cognitive_budget": resources.get("cognitive_budget", 1.0),
                 "attention_available": resources.get("attention_available", 1.0),
                 "model_consensus": envelope.get("model_consensus", forecast.get("agreement", 0.0)),
                 "strategy_disagreement": envelope.get("strategy_disagreement", 0.0),
+                "coherence_drift": envelope.get("coherence_drift", 0.0),
+                "governance_confidence": envelope.get("governance_confidence", governance.get("governance_stability", 0.0)),
                 "reflection_confidence": reflection.get("reflection_confidence", self.niblit_confidence()),
+                "model_trust": envelope.get("model_trust", reflection.get("reflection_confidence", 0.0)),
+                "execution_risk": envelope.get("execution_risk", (envelope.get("risk") or {}).get("emergence_risk", 0.0)),
                 "causal_trace_id": trace.get("causal_trace_id"),
                 "epoch_id": temporal.get("epoch_id"),
                 "epoch_alignment": temporal.get("epoch_alignment", "aligned"),
                 "governance_decision": snapshot.get("decision", {}),
                 "envelope_schema_version": envelope.get("schema_version", "unknown"),
             }
+            results["reconciliation"] = self._build_outcome_reconciliation(results)
             with open(_RESULTS_FILE, "w", encoding="utf-8") as fh:
                 json.dump(results, fh, indent=2)
             self._emit_reflection_event(results)
@@ -296,14 +303,27 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
             "runtime_health": results.get("runtime_health"),
             "model_consensus": results.get("model_consensus"),
             "strategy_disagreement": results.get("strategy_disagreement"),
+            "coherence_drift": results.get("coherence_drift"),
+            "governance_confidence": results.get("governance_confidence"),
             "reflection_confidence": results.get("reflection_confidence"),
+            "model_trust": results.get("model_trust"),
+            "execution_risk": results.get("execution_risk"),
             "causal_trace_id": results.get("causal_trace_id"),
             "epoch_id": results.get("epoch_id"),
             "total_pnl": results.get("total_pnl"),
             "trade_count": results.get("trade_count"),
             "win_count": results.get("win_count"),
+            "reconciliation": results.get("reconciliation", {}),
         }
         self._append_jsonl(_REFLECTION_FILE, event)
+        self._append_jsonl(_EPISODES_FILE, {
+            "event": "reflection_reconciliation",
+            "timestamp": results.get("timestamp"),
+            "regime": results.get("niblit_regime"),
+            "causal_trace_id": results.get("causal_trace_id"),
+            "epoch_id": results.get("epoch_id"),
+            "reconciliation": results.get("reconciliation", {}),
+        })
 
     def _emit_regime_episode(self, results: dict) -> None:
         regime = str(results.get("niblit_regime", "unknown"))
@@ -341,3 +361,64 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
                 handle.write(json.dumps(payload) + "\n")
         except OSError as exc:
             logger.warning("Unable to append event file at %s: %s", path, exc)
+
+    def _build_outcome_reconciliation(self, results: dict) -> dict:
+        """Reconcile predicted regime, action, and realized outcomes."""
+        decision = results.get("governance_decision", {}) or {}
+        reasons = decision.get("reasons", []) if isinstance(decision.get("reasons", []), list) else []
+        predicted_regime = str(results.get("niblit_regime", "unknown"))
+        runtime_state = {
+            "runtime_mode": results.get("runtime_mode", "normal"),
+            "governance_mode": results.get("governance_mode", "normal"),
+            "runtime_health": float(results.get("runtime_health", 0.8)),
+            "runtime_pressure": float(results.get("runtime_pressure", results.get("attention_pressure", 0.2))),
+            "model_orchestration_state": results.get("model_orchestration_state", "unknown"),
+        }
+
+        executed_action = "enter_allowed" if decision.get("allow", True) else "entry_vetoed"
+        if any(reason in {"survival_mode", "lockdown_mode"} for reason in reasons):
+            executed_action = "survival_hardened"
+
+        total_pnl = float(results.get("total_pnl", 0.0))
+        trade_count = int(results.get("trade_count", 0))
+        win_count = int(results.get("win_count", 0))
+        downstream_volatility = float(results.get("forecast_uncertainty", 1.0))
+
+        if trade_count <= 0:
+            actual_outcome = "insufficient_data"
+        elif total_pnl > 0:
+            actual_outcome = "positive_realization"
+        elif total_pnl < 0:
+            actual_outcome = "negative_realization"
+        else:
+            actual_outcome = "flat_realization"
+
+        alignment_score = 1.0
+        if executed_action == "entry_vetoed" and total_pnl > 0:
+            alignment_score = 0.35
+        elif executed_action == "enter_allowed" and total_pnl < 0:
+            alignment_score = 0.40
+        elif executed_action == "survival_hardened" and runtime_state["runtime_health"] < 0.5:
+            alignment_score = 0.85
+        else:
+            alignment_score = 0.70
+
+        confidence_evolution = {
+            "signal_confidence": float(results.get("niblit_conf", 0.5)),
+            "reflection_confidence": float(results.get("reflection_confidence", 0.5)),
+            "governance_confidence": float(results.get("governance_confidence", 0.5)),
+            "model_trust": float(results.get("model_trust", 0.5)),
+        }
+
+        return {
+            "predicted_regime": predicted_regime,
+            "executed_action": executed_action,
+            "actual_outcome": actual_outcome,
+            "downstream_volatility": downstream_volatility,
+            "runtime_state": runtime_state,
+            "alignment_score": round(max(0.0, min(1.0, alignment_score)), 4),
+            "win_rate": round((win_count / trade_count), 4) if trade_count > 0 else 0.0,
+            "confidence_evolution": confidence_evolution,
+            "veto_reasons": reasons,
+            "governance_overrides": decision.get("overrides", {}),
+        }

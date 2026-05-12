@@ -51,9 +51,15 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
     cognitive_budget: float = 1.0,
     attention_available: float = 1.0,
     runtime_health: float = 0.8,
+    runtime_pressure: float = 0.2,
     model_consensus: float = 0.7,
     strategy_disagreement: float = 0.2,
+    coherence_drift: float = 0.0,
+    governance_confidence: float = 0.7,
     reflection_confidence: float = 0.7,
+    model_trust: float = 0.7,
+    execution_risk: float = 0.1,
+    model_orchestration_state: str = "stable",
     execution_priority: str = "normal",
     causal_trace_id: str = "",
     memory_reference_ids: str = "",
@@ -75,9 +81,14 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
     cognitive_budget = max(0.0, min(1.0, cognitive_budget))
     attention_available = max(0.0, min(1.0, attention_available))
     runtime_health = max(0.0, min(1.0, runtime_health))
+    runtime_pressure = max(0.0, min(1.0, runtime_pressure))
     model_consensus = max(0.0, min(1.0, model_consensus))
     strategy_disagreement = max(0.0, min(1.0, strategy_disagreement))
+    coherence_drift = max(0.0, min(1.0, coherence_drift))
+    governance_confidence = max(0.0, min(1.0, governance_confidence))
     reflection_confidence = max(0.0, min(1.0, reflection_confidence))
+    model_trust = max(0.0, min(1.0, model_trust))
+    execution_risk = max(0.0, min(1.0, execution_risk))
 
     ts = int(time.time())
     if not governance_mode:
@@ -120,6 +131,7 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
                 "survival_mode": runtime_mode == "survival",
                 "governance_mode": governance_mode,
                 "governance_stability": round(max(0.0, min(1.0, 1.0 - emergence_risk)), 4),
+                "governance_confidence": round(governance_confidence, 4),
                 "current_drawdown_pct": 0.0,
                 "max_drawdown_pct": 0.12,
             },
@@ -138,6 +150,7 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
             },
             "temporal": {
                 "epoch_id": ts,
+                "temporal_epoch": ts,
                 "coherence_score": round(coherence, 4),
                 "epoch_alignment": "aligned",
             },
@@ -147,6 +160,8 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
                 "instability": round(emergence_risk, 4),
                 "attention_pressure": round(attention_pressure, 4),
                 "runtime_health": round(runtime_health, 4),
+                "runtime_pressure": round(runtime_pressure, 4),
+                "model_orchestration_state": model_orchestration_state,
             },
             "risk": {
                 "emergence_risk": round(emergence_risk, 4),
@@ -165,6 +180,10 @@ def write_signal(  # pylint: disable=too-many-positional-arguments,too-many-loca
             },
             "model_consensus": round(model_consensus, 4),
             "strategy_disagreement": round(strategy_disagreement, 4),
+            "coherence_drift": round(coherence_drift, 4),
+            "governance_confidence": round(governance_confidence, 4),
+            "model_trust": round(model_trust, 4),
+            "execution_risk": round(execution_risk, 4),
             "advisors": {
                 "votes": advisor_votes or {},
             },
@@ -299,12 +318,24 @@ def main() -> None:
                         help="Attention availability 0-1 (default: 1.0)")
     parser.add_argument("--runtime-health", type=float, default=0.8,
                         help="Runtime health score 0-1 (default: 0.8)")
+    parser.add_argument("--runtime-pressure", type=float, default=0.2,
+                        help="Runtime pressure score 0-1 (default: 0.2)")
     parser.add_argument("--model-consensus", type=float, default=0.7,
                         help="Advisor consensus score 0-1 (default: 0.7)")
     parser.add_argument("--strategy-disagreement", type=float, default=0.2,
                         help="Advisor disagreement score 0-1 (default: 0.2)")
+    parser.add_argument("--coherence-drift", type=float, default=0.0,
+                        help="Coherence drift score 0-1 (default: 0.0)")
+    parser.add_argument("--governance-confidence", type=float, default=0.7,
+                        help="Governance confidence score 0-1 (default: 0.7)")
     parser.add_argument("--reflection-confidence", type=float, default=0.7,
                         help="Reflection confidence 0-1 (default: 0.7)")
+    parser.add_argument("--model-trust", type=float, default=0.7,
+                        help="Model trust score 0-1 (default: 0.7)")
+    parser.add_argument("--execution-risk", type=float, default=0.1,
+                        help="Execution risk score 0-1 (default: 0.1)")
+    parser.add_argument("--model-orchestration-state", default="stable",
+                        help="Model orchestration state label (default: stable)")
     parser.add_argument("--execution-priority", choices=["low", "normal", "high"], default="normal",
                         help="Execution priority (default: normal)")
     parser.add_argument("--causal-trace-id", default="",
@@ -353,9 +384,15 @@ def main() -> None:
             cognitive_budget=args.cognitive_budget,
             attention_available=args.attention_available,
             runtime_health=args.runtime_health,
+            runtime_pressure=args.runtime_pressure,
             model_consensus=args.model_consensus,
             strategy_disagreement=args.strategy_disagreement,
+            coherence_drift=args.coherence_drift,
+            governance_confidence=args.governance_confidence,
             reflection_confidence=args.reflection_confidence,
+            model_trust=args.model_trust,
+            execution_risk=args.execution_risk,
+            model_orchestration_state=args.model_orchestration_state,
             execution_priority=args.execution_priority,
             causal_trace_id=args.causal_trace_id,
             memory_reference_ids=args.memory_reference_ids,

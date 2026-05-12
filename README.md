@@ -22,6 +22,7 @@ The repository hosts two generations of Niblit trading code side-by-side:
 7. [Environment Variables](#environment-variables)
 8. [GitHub Actions Workflows](#github-actions-workflows)
 9. [Legacy QuantConnect Section](#legacy-quantconnect-section)
+10. [Governed Cognitive Execution Node](#governed-cognitive-execution-node)
 
 ---
 
@@ -232,6 +233,7 @@ export NIBLIT_SIGNAL_FILE=/path/to/niblit_lean_signal.json
 Additional telemetry files:
 - `NIBLIT_REFLECTION_FILE` (default: `/tmp/niblit_trade_reflection.jsonl`)
 - `NIBLIT_EPISODES_FILE` (default: `/tmp/niblit_market_episodes.jsonl`)
+- `NIBLIT_TRACE_FILE` (default: `runtime_traces/execution_trace.jsonl`)
 
 ### MRO usage
 
@@ -287,10 +289,16 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
 | `NIBLIT_SIGNAL_FILE` | `/tmp/niblit_lean_signal.json` | Path to Niblit cognitive envelope JSON |
 | `NIBLIT_SIGNAL_MAX_AGE` | `300` | Max signal age in seconds before stale |
+| `NIBLIT_CLOUD_RUNTIME_URL` | — | Optional cloud runtime coordination endpoint (adapter probes `/niblit/runtime`) |
+| `NIBLIT_CLOUD_RUNTIME_TIMEOUT` | `3.0` | Cloud runtime probe timeout (seconds) |
+| `NIBLIT_CLOUD_RUNTIME_MAX_AGE` | `120` | Max cloud runtime snapshot age in seconds |
+| `NIBLIT_ADAPTER_REFRESH_S` | `5.0` | Runtime adapter cache refresh interval |
+| `NIBLIT_COHERENCE_DRIFT_THRESHOLD` | `0.10` | Drift threshold for coherence instability flagging |
 | `NIBLIT_MIN_CONF` | `0.55` | Min Niblit confidence to trigger veto |
 | `NIBLIT_RESULTS_FILE` | `/tmp/niblit_ft_results.json` | Freqtrade → Niblit results path |
 | `NIBLIT_REFLECTION_FILE` | `/tmp/niblit_trade_reflection.jsonl` | Trade reflection events (JSONL) |
 | `NIBLIT_EPISODES_FILE` | `/tmp/niblit_market_episodes.jsonl` | Market episode events (JSONL) |
+| `NIBLIT_TRACE_FILE` | `runtime_traces/execution_trace.jsonl` | Replay trace sink for governed execution decisions |
 | `NIBLIT_SURVIVAL_COHERENCE` | `0.30` | Coherence threshold triggering survival-mode block |
 | `NIBLIT_CONSTRAINED_COHERENCE` | `0.45` | Coherence threshold triggering constrained sizing |
 | `NIBLIT_CAUTIOUS_COHERENCE` | `0.52` | Coherence threshold triggering cautious mode |
@@ -358,6 +366,30 @@ The `algorithms/` directory contains **22 QuantConnect LEAN algorithms** (equity
 | 18 | Transformer Attention | Deep learning |
 | 19 | Sentiment Alpha | NLP |
 | 20 | Niblit AI Master | AI flagship |
+
+---
+
+## Governed Cognitive Execution Node
+
+The repository now supports a governance-first runtime architecture designed to align with Niblit and Niblit-cloud-server:
+
+- **Distributed runtime awareness** through `freqtrade_strategies/runtime_adapter.py`
+  - source priority: cloud runtime → local signal sidecar → fallback defaults
+  - runtime state synchronization: epoch, coherence, governance mode, runtime health, model orchestration state
+- **Schema-v2 optional envelope fields** for runtime pressure, coherence drift, governance confidence, model trust, execution risk, and extended resource state
+- **Enhanced governance arbitration** in `TradeGovernanceGate`
+  - runtime-pressure adaptation
+  - coherence-drift throttling
+  - confidence decay under instability
+  - survival hardening and lockdown blocks
+- **Replayable explainability traces** in `runtime_traces/execution_trace.jsonl`
+  - veto reasons, advisor contributions, consensus state, governance overrides, runtime influence, and causal references
+- **Reflection + outcome reconciliation** in `NiblitAiMaster` sidecars
+  - structured reconciliation episodes connecting predicted regime, executed action, realized outcome, downstream volatility, and runtime state
+
+For deeper details, see:
+- `docs/architecture.md`
+- `docs/governance.md`
 | 21 | Forex Multi-Pair | FX |
 | 22 | Self-Aware Adaptive | Meta-learning |
 

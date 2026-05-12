@@ -71,6 +71,8 @@ class RuntimeState:
     attention_available: float = 1.0
     model_trust: float = 0.8
     execution_risk: float = 0.2
+    runtime_pressure: float = 0.2
+    model_orchestration_state: str = "unknown"
     survival_mode: bool = False
     constitution_passed: bool = True
     epoch_id: int = 0
@@ -92,6 +94,8 @@ class RuntimeState:
             "attention_available": self.attention_available,
             "model_trust": self.model_trust,
             "execution_risk": self.execution_risk,
+            "runtime_pressure": self.runtime_pressure,
+            "model_orchestration_state": self.model_orchestration_state,
             "survival_mode": self.survival_mode,
             "constitution_passed": self.constitution_passed,
             "epoch_id": self.epoch_id,
@@ -128,10 +132,12 @@ def _parse_envelope_into_state(payload: Dict[str, Any], source: str) -> RuntimeS
 
     runtime_health = _clamp(runtime.get("runtime_health", 0.8))
     attention_pressure = _clamp(runtime.get("attention_pressure", 0.2))
+    runtime_pressure = _clamp(runtime.get("runtime_pressure", (attention_pressure + _clamp(runtime.get("instability", 0.0))) / 2.0))
     cognitive_budget = _clamp(resources.get("cognitive_budget", 1.0))
     attention_available = _clamp(resources.get("attention_available", 1.0))
     model_trust = _clamp(payload.get("model_trust", reflection.get("reflection_confidence", 0.8)))
     execution_risk = _clamp(payload.get("execution_risk", risk.get("emergence_risk", 0.2)))
+    model_orchestration_state = str(runtime.get("model_orchestration_state", payload.get("model_orchestration_state", "unknown")))
     survival_mode = bool(governance.get("survival_mode", runtime_mode in {"survival", "lockdown"}))
     constitution_passed = bool(governance.get("constitution_passed", True))
     epoch_id = int(temporal.get("epoch_id", payload.get("timestamp", 0)))
@@ -144,10 +150,12 @@ def _parse_envelope_into_state(payload: Dict[str, Any], source: str) -> RuntimeS
         coherence_drift=coherence_drift,
         runtime_health=runtime_health,
         attention_pressure=attention_pressure,
+        runtime_pressure=runtime_pressure,
         cognitive_budget=cognitive_budget,
         attention_available=attention_available,
         model_trust=model_trust,
         execution_risk=execution_risk,
+        model_orchestration_state=model_orchestration_state,
         survival_mode=survival_mode,
         constitution_passed=constitution_passed,
         epoch_id=epoch_id,
@@ -237,6 +245,10 @@ class RuntimeAdapter:
             runtime["runtime_health"] = state.runtime_health
         if cloud_authority or "attention_pressure" not in runtime:
             runtime["attention_pressure"] = state.attention_pressure
+        if cloud_authority or "runtime_pressure" not in runtime:
+            runtime["runtime_pressure"] = state.runtime_pressure
+        if cloud_authority or "model_orchestration_state" not in runtime:
+            runtime["model_orchestration_state"] = state.model_orchestration_state
         if cloud_authority or "mode" not in runtime or runtime["mode"] == "normal":
             # Escalate runtime mode if adapter suggests higher pressure
             existing_mode = str(runtime.get("mode", "normal")).lower()
@@ -370,10 +382,12 @@ class RuntimeAdapter:
                 coherence_drift=_clamp(drift),
                 runtime_health=state.runtime_health,
                 attention_pressure=state.attention_pressure,
+                runtime_pressure=state.runtime_pressure,
                 cognitive_budget=state.cognitive_budget,
                 attention_available=state.attention_available,
                 model_trust=state.model_trust,
                 execution_risk=state.execution_risk,
+                model_orchestration_state=state.model_orchestration_state,
                 survival_mode=state.survival_mode,
                 constitution_passed=state.constitution_passed,
                 epoch_id=state.epoch_id,

@@ -56,6 +56,25 @@ class GovernanceGateTests(unittest.TestCase):
         self.assertFalse(decision.allow)
         self.assertIn("survival_mode", decision.reasons)
 
+    def test_runtime_pressure_reduces_position(self):
+        gate = TradeGovernanceGate()
+        env = _base_envelope()
+        env["runtime"]["runtime_pressure"] = 0.95
+        decision = gate.evaluate(env, is_long=True)
+        self.assertIn("runtime_pressure_high", decision.reasons)
+        self.assertLess(decision.overrides.get("position_multiplier", 1.0), 1.0)
+
+    def test_confidence_decay_under_instability_can_block(self):
+        gate = TradeGovernanceGate()
+        env = _base_envelope()
+        env["confidence"] = 0.2
+        env["runtime"]["runtime_health"] = 0.2
+        env["runtime"]["runtime_pressure"] = 0.9
+        env["coherence_drift"] = 0.5
+        decision = gate.evaluate(env, is_long=True)
+        self.assertIn("confidence_decay_under_instability", decision.reasons)
+        self.assertFalse(decision.allow)
+
     def test_high_disagreement_penalizes_position(self):
         gate = TradeGovernanceGate()
         env = _base_envelope()
