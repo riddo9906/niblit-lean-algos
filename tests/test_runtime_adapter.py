@@ -9,7 +9,8 @@ from freqtrade_strategies.runtime_adapter import RuntimeAdapter
 
 class RuntimeAdapterTests(unittest.TestCase):
     def test_fallback_when_no_sources_available(self):
-        adapter = RuntimeAdapter(cloud_url="", local_signal_file="/tmp/does-not-exist.json", refresh_interval_s=0.0)
+        missing = os.path.join(tempfile.gettempdir(), "niblit-nonexistent-signal.json")
+        adapter = RuntimeAdapter(cloud_url="", local_signal_file=missing, refresh_interval_s=0.0)
         state = adapter.get_state()
         self.assertEqual(state.source, "fallback")
         self.assertEqual(state.runtime_mode, "normal")

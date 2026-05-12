@@ -54,6 +54,7 @@ _REFRESH_INTERVAL_S: float = float(os.environ.get("NIBLIT_ADAPTER_REFRESH_S", "5
 _COHERENCE_DRIFT_THRESHOLD: float = float(
     os.environ.get("NIBLIT_COHERENCE_DRIFT_THRESHOLD", "0.10")
 )
+_CLOUD_RUNTIME_PATH: str = os.environ.get("NIBLIT_CLOUD_RUNTIME_PATH", "/niblit/runtime")
 
 
 @dataclass
@@ -192,6 +193,7 @@ class RuntimeAdapter:
         cloud_max_age_s: int = _CLOUD_MAX_AGE_S,
         local_max_age_s: int = _LOCAL_MAX_AGE_S,
         refresh_interval_s: float = _REFRESH_INTERVAL_S,
+        cloud_runtime_path: str = _CLOUD_RUNTIME_PATH,
     ) -> None:
         self.cloud_url = cloud_url.rstrip("/") if cloud_url else ""
         self.local_signal_file = local_signal_file
@@ -199,6 +201,7 @@ class RuntimeAdapter:
         self.cloud_max_age_s = cloud_max_age_s
         self.local_max_age_s = local_max_age_s
         self.refresh_interval_s = refresh_interval_s
+        self.cloud_runtime_path = cloud_runtime_path or "/niblit/runtime"
 
         self._cached_state: Optional[RuntimeState] = None
         self._last_refresh: float = 0.0
@@ -288,6 +291,7 @@ class RuntimeAdapter:
             "cloud_max_age_s": self.cloud_max_age_s,
             "local_max_age_s": self.local_max_age_s,
             "refresh_interval_s": self.refresh_interval_s,
+            "cloud_runtime_path": self.cloud_runtime_path,
             "last_state": state.to_dict(),
         }
 
@@ -311,7 +315,7 @@ class RuntimeAdapter:
 
     def _probe_cloud(self) -> Optional[RuntimeState]:
         """Fetch envelope-compatible JSON from the configured cloud URL."""
-        url = f"{self.cloud_url}/niblit/runtime" if self.cloud_url else ""
+        url = f"{self.cloud_url}{self.cloud_runtime_path}" if self.cloud_url else ""
         if not url:
             return None
         try:

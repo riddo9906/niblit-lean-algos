@@ -65,12 +65,16 @@ class NiblitSignalMixin:
 
     def _niblit_adapter(self) -> RuntimeAdapter:
         if not hasattr(self, "_niblit_adapter_instance"):
-            self._niblit_adapter_instance = get_global_adapter()
+            with NiblitSignalMixin._niblit_lock:
+                if not hasattr(self, "_niblit_adapter_instance"):
+                    self._niblit_adapter_instance = get_global_adapter()
         return self._niblit_adapter_instance
 
     def _niblit_replay(self) -> ExecutionReplayWriter:
         if not hasattr(self, "_niblit_replay_instance"):
-            self._niblit_replay_instance = ExecutionReplayWriter(trace_file=_TRACE_FILE)
+            with NiblitSignalMixin._niblit_lock:
+                if not hasattr(self, "_niblit_replay_instance"):
+                    self._niblit_replay_instance = ExecutionReplayWriter(trace_file=_TRACE_FILE)
         return self._niblit_replay_instance
 
     def _niblit_enrich_envelope(self, envelope: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

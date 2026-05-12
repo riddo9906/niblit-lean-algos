@@ -60,6 +60,12 @@ _EPISODES_FILE = os.environ.get(
 class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     """Niblit AI Master — Freqtrade edition."""
 
+    _ALIGNMENT_VETOED_BUT_POSITIVE = 0.35
+    _ALIGNMENT_ALLOWED_BUT_NEGATIVE = 0.40
+    _ALIGNMENT_SURVIVAL_WITH_LOW_HEALTH = 0.85
+    _ALIGNMENT_DEFAULT = 0.70
+    _LOW_RUNTIME_HEALTH = 0.5
+
     INTERFACE_VERSION = 3
     timeframe = "1h"
     can_short = False
@@ -395,13 +401,13 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
 
         alignment_score = 1.0
         if executed_action == "entry_vetoed" and total_pnl > 0:
-            alignment_score = 0.35
+            alignment_score = self._ALIGNMENT_VETOED_BUT_POSITIVE
         elif executed_action == "enter_allowed" and total_pnl < 0:
-            alignment_score = 0.40
-        elif executed_action == "survival_hardened" and runtime_state["runtime_health"] < 0.5:
-            alignment_score = 0.85
+            alignment_score = self._ALIGNMENT_ALLOWED_BUT_NEGATIVE
+        elif executed_action == "survival_hardened" and runtime_state["runtime_health"] < self._LOW_RUNTIME_HEALTH:
+            alignment_score = self._ALIGNMENT_SURVIVAL_WITH_LOW_HEALTH
         else:
-            alignment_score = 0.70
+            alignment_score = self._ALIGNMENT_DEFAULT
 
         confidence_evolution = {
             "signal_confidence": float(results.get("niblit_conf", 0.5)),

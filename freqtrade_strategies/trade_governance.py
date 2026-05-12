@@ -28,6 +28,8 @@ class TradeGovernanceGate:
     min_cognitive_budget: float = 0.10
     max_coherence_drift: float = 0.20
     min_model_trust: float = 0.35
+    min_runtime_health_factor: float = 0.25
+    min_coherence_factor: float = 0.40
 
     # Regime-aware execution caps:
     # - 0.0 means force HOLD (no new risk) for extreme instability regimes.
@@ -62,6 +64,8 @@ class TradeGovernanceGate:
             "min_cognitive_budget": self.min_cognitive_budget,
             "max_coherence_drift": self.max_coherence_drift,
             "min_model_trust": self.min_model_trust,
+            "min_runtime_health_factor": self.min_runtime_health_factor,
+            "min_coherence_factor": self.min_coherence_factor,
         }
 
     # pylint: disable=too-many-locals,too-many-branches
@@ -204,7 +208,9 @@ class TradeGovernanceGate:
         if confidence < 0.10:
             reasons.append("confidence_too_low")
         elif runtime_health < 0.50 or runtime_pressure > self.max_runtime_pressure or coherence_drift > self.max_coherence_drift:
-            adjusted_confidence = confidence * max(0.25, runtime_health) * max(0.4, 1.0 - coherence_drift)
+            adjusted_confidence = confidence * max(self.min_runtime_health_factor, runtime_health) * max(
+                self.min_coherence_factor, 1.0 - coherence_drift
+            )
             overrides["adjusted_confidence"] = adjusted_confidence
             if adjusted_confidence < 0.15:
                 reasons.append("confidence_decay_under_instability")
