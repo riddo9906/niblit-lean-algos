@@ -48,6 +48,10 @@ try:
 except ImportError:
     _dotenv_load_dotenv = None
 
+_ENV_LINE_RE = re.compile(
+    r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\r\n]*))\s*$"""
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # .env loader  (python-dotenv when available, plain parser otherwise)
@@ -67,15 +71,12 @@ def _load_dotenv(env_file: Path) -> None:
         return
 
     # Minimal fallback parser (handles KEY=VALUE, KEY="VALUE", KEY='VALUE')
-    _line_re = re.compile(
-        r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\r\n]*))\s*$"""
-    )
     try:
         for raw_line in env_file.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
-            m = _line_re.match(line)
+            m = _ENV_LINE_RE.match(line)
             if m:
                 key = m.group(1)
                 value = (m.group(2) or m.group(3) or m.group(4) or "").strip()
