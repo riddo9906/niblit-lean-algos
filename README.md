@@ -22,12 +22,15 @@ The repository hosts two generations of Niblit trading code side-by-side:
 7. [Environment Variables](#environment-variables)
 8. [GitHub Actions Workflows](#github-actions-workflows)
 9. [Legacy QuantConnect Section](#legacy-quantconnect-section)
+10. [Governed Cognitive Execution Node](#governed-cognitive-execution-node)
 
 ---
 
 ## Project Overview
 
-Niblit AI generates trading signals (BUY / SELL / HOLD) with a confidence score and market regime label. These signals are written to a JSON sidecar file. Freqtrade strategies read that file via the **`NiblitSignalMixin`** and use it to veto or weight entry/exit decisions.
+Niblit AI now publishes a versioned cognitive execution envelope (schema `2.0`).  
+It includes signal intent, forecast consensus, governance state, execution constraints, temporal coherence, and runtime mode.  
+Freqtrade strategies read that file via the **`NiblitSignalMixin`** and act as advisors while governed execution gates make final allow/deny and sizing decisions.
 
 - **Exchange**: Binance (spot and futures)
 - **Quote currency**: USDT
@@ -49,7 +52,10 @@ niblit-lean-algos/
 │   ├── RsiMeanReversion.py        # RSI oversold/overbought + EMA trend
 │   ├── BollingerSqueeze.py        # Bollinger Band squeeze breakout
 │   ├── SupertrendAtr.py           # Supertrend ATR flip
-│   └── NiblitAiMaster.py          # Flagship: 70% AI + 30% internal signal
+│   ├── advisor_protocol.py        # Advisor vote normalization + debate consensus
+│   ├── trade_governance.py        # Governance gate + runtime mode enforcement
+│   ├── cognitive_envelope.py      # Envelope normalization + legacy bridge
+│   └── NiblitAiMaster.py          # Flagship governed execution strategy
 │
 ├── configs/                       # ← NEW: Freqtrade configuration files
 │   ├── freqtrade_config_binance.json      # Live trading config
@@ -164,9 +170,9 @@ python scripts/ft_live.py balance
 | **RsiMeanReversion** | RSI oversold + EMA50/200 uptrend filter | -3% | ❌ | RSI period + thresholds | ✅ |
 | **BollingerSqueeze** | BB squeeze release + bullish momentum | -3% | ❌ | BB std, Keltner multiplier | ✅ |
 | **SupertrendAtr** | Supertrend bullish flip + ATR | -5% | ❌ | ST period + multiplier | ✅ |
-| **NiblitAiMaster** | 70% Niblit AI + 30% EMA/RSI | -3% | ❌ | None (regime-driven) | ✅ |
+| **NiblitAiMaster** | Advisor-driven indicators + centralized governance gate | -3% | ❌ | None (envelope-driven) | ✅ |
 
-All strategies use **`INTERFACE_VERSION = 3`**, `timeframe = "1h"`, and include `confirm_trade_entry()` for Niblit AI veto.
+All strategies use **`INTERFACE_VERSION = 3`**, `timeframe = "1h"`, and include `confirm_trade_entry()` routing through centralized `TradeGovernanceGate` checks.
 
 ---
 
@@ -178,20 +184,41 @@ The mixin reads a JSON signal file written by Niblit's TradingBrain:
 
 ```json
 {
-  "signal":     "BUY",
+  "schema_version": "2.0",
+  "signal": "BUY",
   "confidence": 0.82,
-  "symbol":     "BTC/USDT",
-  "timestamp":  1713100000,
-  "regime":     "bullish",
-  "risk_pct":   0.02
+  "market_regime": "volatile_breakout",
+  "forecast_consensus": {
+    "direction": "UP",
+    "agreement": 0.74,
+    "uncertainty": 0.18
+  },
+  "governance": {
+    "constitution_passed": true,
+    "survival_mode": false
+  },
+  "execution": {
+    "max_position_size": 0.04,
+    "hold_only": false
+  },
+  "temporal": {
+    "coherence_score": 0.83
+  },
+  "runtime": {
+    "mode": "normal"
+  },
+  "timestamp": 1713100000
 }
 ```
 
 **In live / dry-run mode:**
-- `confirm_trade_entry()` calls `niblit_block_entry(pair, is_long)` — returns `False` (block) when Niblit contradicts the direction with confidence ≥ `NIBLIT_MIN_CONF` (default 0.55)
-- `NiblitAiMaster` additionally weights entries: combined score = 70% × Niblit + 30% × internal; threshold 0.20
-- Regime `"volatile"` / `"crash"` / `"bear"` → all entries blocked, open longs force-exited
-- Regime `"ranging"` / `"sideways"` → position size halved via `custom_stake_amount()`
+- `confirm_trade_entry()` calls the `TradeGovernanceGate` through `niblit_allow_entry(pair, is_long)`
+- Constitutional, coherence, uncertainty/consensus, drawdown, survival mode, and regime constraints are enforced pre-trade
+- Advisor votes are normalized into consensus/disagreement values through `advisor_protocol.summarize_debate()`
+- Adaptive position size is centralized in `NiblitSignalMixin.custom_stake_amount()` from confidence × coherence × agreement × runtime stability × governance stability × (1 - emergence risk) × attention/budget factors × disagreement inverse
+- Rich regime identities (e.g. `volatile_breakout`, `liquidity_trap`, `panic_capitulation`, `news_driven_instability`) map to automatic execution caps or holds
+- Runtime governance modes are explicit: `normal`, `cautious`, `survival`, `lockdown`
+- `NiblitAiMaster` emits reflection telemetry and market episode events as JSONL sidecars for external memory ingestion
 
 **In backtesting mode:**
 - Signal file is absent → `_niblit_read()` returns `None` → all helpers return neutral values
@@ -203,6 +230,10 @@ export NIBLIT_SIGNAL_FILE=/path/to/niblit_lean_signal.json
 ```
 
 **Results write-back**: `NiblitAiMaster.bot_loop_start()` writes `niblit_ft_results.json` so Niblit can observe Freqtrade's performance.
+Additional telemetry files:
+- `NIBLIT_REFLECTION_FILE` (default: `/tmp/niblit_trade_reflection.jsonl`)
+- `NIBLIT_EPISODES_FILE` (default: `/tmp/niblit_market_episodes.jsonl`)
+- `NIBLIT_TRACE_FILE` (default: `runtime_traces/execution_trace.jsonl`)
 
 ### MRO usage
 
@@ -256,10 +287,35 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `FT_API_PASS` | — | Freqtrade REST API password |
 | `TELEGRAM_TOKEN` | — | Telegram bot token for notifications |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
-| `NIBLIT_SIGNAL_FILE` | `/tmp/niblit_lean_signal.json` | Path to Niblit signal JSON |
+| `NIBLIT_SIGNAL_FILE` | `/tmp/niblit_lean_signal.json` | Path to Niblit cognitive envelope JSON |
 | `NIBLIT_SIGNAL_MAX_AGE` | `300` | Max signal age in seconds before stale |
+| `NIBLIT_CLOUD_RUNTIME_URL` | — | Optional cloud runtime coordination endpoint (adapter probes `/niblit/runtime`) |
+| `NIBLIT_CLOUD_RUNTIME_TIMEOUT` | `3.0` | Cloud runtime probe timeout (seconds) |
+| `NIBLIT_CLOUD_RUNTIME_MAX_AGE` | `120` | Max cloud runtime snapshot age in seconds |
+| `NIBLIT_ADAPTER_REFRESH_S` | `5.0` | Runtime adapter cache refresh interval |
+| `NIBLIT_COHERENCE_DRIFT_THRESHOLD` | `0.10` | Drift threshold for coherence instability flagging |
 | `NIBLIT_MIN_CONF` | `0.55` | Min Niblit confidence to trigger veto |
 | `NIBLIT_RESULTS_FILE` | `/tmp/niblit_ft_results.json` | Freqtrade → Niblit results path |
+| `NIBLIT_REFLECTION_FILE` | `/tmp/niblit_trade_reflection.jsonl` | Trade reflection events (JSONL) |
+| `NIBLIT_EPISODES_FILE` | `/tmp/niblit_market_episodes.jsonl` | Market episode events (JSONL) |
+| `NIBLIT_TRACE_FILE` | `runtime_traces/execution_trace.jsonl` | Replay trace sink for governed execution decisions |
+| `NIBLIT_SURVIVAL_COHERENCE` | `0.30` | Coherence threshold triggering survival-mode block |
+| `NIBLIT_CONSTRAINED_COHERENCE` | `0.45` | Coherence threshold triggering constrained sizing |
+| `NIBLIT_CAUTIOUS_COHERENCE` | `0.52` | Coherence threshold triggering cautious mode |
+| `NIBLIT_MAX_ATTENTION_PRESSURE` | `0.85` | Attention pressure threshold triggering cautious mode |
+| `NIBLIT_MIN_COGNITIVE_BUDGET` | `0.10` | Minimum cognitive budget before governance throttles stake |
+| `NIBLIT_MIN_HEALTH_MULTIPLIER` | `0.05` | Floor for adaptive sizing multiplier under degraded cognition |
+| `NIBLIT_WEIGHT_CONFIDENCE` | `1.0` | Exponent weight for confidence in adaptive sizing |
+| `NIBLIT_WEIGHT_COHERENCE` | `1.0` | Exponent weight for coherence in adaptive sizing |
+| `NIBLIT_WEIGHT_AGREEMENT` | `1.0` | Exponent weight for consensus agreement in adaptive sizing |
+| `NIBLIT_WEIGHT_RUNTIME_STABILITY` | `1.0` | Exponent weight for runtime stability in adaptive sizing |
+| `NIBLIT_WEIGHT_GOVERNANCE_STABILITY` | `1.0` | Exponent weight for governance stability in adaptive sizing |
+| `NIBLIT_WEIGHT_EMERGENCE_INVERSE` | `1.0` | Exponent weight for inverse emergence risk in adaptive sizing |
+| `NIBLIT_WEIGHT_ATTENTION_INVERSE` | `1.0` | Exponent weight for inverse attention pressure in adaptive sizing |
+| `NIBLIT_WEIGHT_COGNITIVE_BUDGET` | `1.0` | Exponent weight for cognitive budget in adaptive sizing |
+| `NIBLIT_WEIGHT_ATTENTION_AVAILABLE` | `1.0` | Exponent weight for attention availability in adaptive sizing |
+| `NIBLIT_WEIGHT_MODEL_CONSENSUS` | `1.0` | Exponent weight for advisor consensus in adaptive sizing |
+| `NIBLIT_WEIGHT_DISAGREEMENT_INVERSE` | `1.0` | Exponent weight for inverse advisor disagreement in adaptive sizing |
 
 Copy `.env.example` to `.env` and fill in values before running locally.
 
@@ -310,6 +366,30 @@ The `algorithms/` directory contains **22 QuantConnect LEAN algorithms** (equity
 | 18 | Transformer Attention | Deep learning |
 | 19 | Sentiment Alpha | NLP |
 | 20 | Niblit AI Master | AI flagship |
+
+---
+
+## Governed Cognitive Execution Node
+
+The repository now supports a governance-first runtime architecture designed to align with Niblit and Niblit-cloud-server:
+
+- **Distributed runtime awareness** through `freqtrade_strategies/runtime_adapter.py`
+  - source priority: cloud runtime → local signal sidecar → fallback defaults
+  - runtime state synchronization: epoch, coherence, governance mode, runtime health, model orchestration state
+- **Schema-v2 optional envelope fields** for runtime pressure, coherence drift, governance confidence, model trust, execution risk, and extended resource state
+- **Enhanced governance arbitration** in `TradeGovernanceGate`
+  - runtime-pressure adaptation
+  - coherence-drift throttling
+  - confidence decay under instability
+  - survival hardening and lockdown blocks
+- **Replayable explainability traces** in `runtime_traces/execution_trace.jsonl`
+  - veto reasons, advisor contributions, consensus state, governance overrides, runtime influence, and causal references
+- **Reflection + outcome reconciliation** in `NiblitAiMaster` sidecars
+  - structured reconciliation episodes connecting predicted regime, executed action, realized outcome, downstream volatility, and runtime state
+
+For deeper details, see:
+- `docs/architecture.md`
+- `docs/governance.md`
 | 21 | Forex Multi-Pair | FX |
 | 22 | Self-Aware Adaptive | Meta-learning |
 

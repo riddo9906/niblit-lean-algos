@@ -8,6 +8,8 @@ Sub-commands:
     status      Show bot status via REST API
     trades      Show recent trades via REST API
     balance     Show current balance via REST API
+    mode        Show cognitive runtime mode from Niblit envelope
+    health      Show cognitive health snapshot from Niblit envelope
 
 Environment variables:
     BINANCE_API_KEY      Binance exchange API key
@@ -39,7 +41,6 @@ import argparse
 import base64
 import json
 import os
-import subprocess
 import sys
 import urllib.request
 import urllib.error
@@ -53,6 +54,10 @@ _FT_PORT = os.environ.get("FT_API_PORT", "8080")
 _FT_USER = os.environ.get("FT_API_USER", "freqtrader")
 _FT_PASS = os.environ.get("FT_API_PASS", "")
 _FT_BASE = f"http://{_FT_HOST}:{_FT_PORT}/api/v1"
+_NIBLIT_SIGNAL_FILE = os.environ.get(
+    "NIBLIT_SIGNAL_FILE",
+    os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_lean_signal.json"),
+)
 
 
 def _ft_request(method: str, path: str,
@@ -132,6 +137,84 @@ def cmd_balance(args: argparse.Namespace) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _load_signal_payload() -> Dict[str, Any]:
+    path = Path(_NIBLIT_SIGNAL_FILE)
+    if not path.is_file():
+        return {"status": "missing_signal_file", "path": str(path)}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {"status": "invalid_signal_file", "path": str(path), "error": str(exc)}
+
+    runtime = payload.get("runtime")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    temporal = payload.get("temporal")
+    temporal = temporal if isinstance(temporal, dict) else {}
+    forecast = payload.get("forecast_consensus")
+    forecast = forecast if isinstance(forecast, dict) else {}
+    governance = payload.get("governance")
+    governance = governance if isinstance(governance, dict) else {}
+    execution = payload.get("execution")
+    execution = execution if isinstance(execution, dict) else {}
+
+    return {
+        "status": "ok",
+        "path": str(path),
+        "schema_version": payload.get("schema_version", "legacy"),
+        "signal": payload.get("signal"),
+        "confidence": payload.get("confidence"),
+        "market_regime": payload.get("market_regime", payload.get("regime", "unknown")),
+        "runtime_mode": runtime.get("mode", "normal"),
+        "governance_mode": governance.get("governance_mode", runtime.get("mode", "normal")),
+        "runtime_health": runtime.get("health", "unknown"),
+        "runtime_health_score": runtime.get("runtime_health"),
+        "attention_pressure": runtime.get("attention_pressure"),
+        "coherence_score": temporal.get("coherence_score"),
+        "epoch_alignment": temporal.get("epoch_alignment"),
+        "forecast_agreement": forecast.get("agreement"),
+        "forecast_uncertainty": forecast.get("uncertainty"),
+        "model_consensus": payload.get("model_consensus"),
+        "strategy_disagreement": payload.get("strategy_disagreement"),
+        "constitution_passed": governance.get("constitution_passed", True),
+        "survival_mode": governance.get("survival_mode", False),
+        "hold_only": execution.get("hold_only", False),
+        "execution_priority": execution.get("execution_priority", "normal"),
+        "max_position_size": execution.get("max_position_size", payload.get("risk_pct")),
+        "cognitive_budget": (payload.get("resources") or {}).get("cognitive_budget"),
+        "attention_available": (payload.get("resources") or {}).get("attention_available"),
+        "causal_trace_id": (payload.get("trace") or {}).get("causal_trace_id"),
+        "memory_reference_ids": (payload.get("trace") or {}).get("memory_reference_ids", []),
+    }
+
+
+def cmd_mode(args: argparse.Namespace) -> None:
+    print(json.dumps(_load_signal_payload(), indent=2))
+
+
+def cmd_health(args: argparse.Namespace) -> None:
+    payload = _load_signal_payload()
+    if payload.get("status") != "ok":
+        print(json.dumps(payload, indent=2))
+        return
+    health = {
+        "runtime_mode": payload.get("runtime_mode"),
+        "runtime_health": payload.get("runtime_health"),
+        "coherence_score": payload.get("coherence_score"),
+        "attention_pressure": payload.get("attention_pressure"),
+        "runtime_health_score": payload.get("runtime_health_score"),
+        "cognitive_budget": payload.get("cognitive_budget"),
+        "attention_available": payload.get("attention_available"),
+        "forecast_agreement": payload.get("forecast_agreement"),
+        "forecast_uncertainty": payload.get("forecast_uncertainty"),
+        "model_consensus": payload.get("model_consensus"),
+        "strategy_disagreement": payload.get("strategy_disagreement"),
+        "constitution_passed": payload.get("constitution_passed"),
+        "survival_mode": payload.get("survival_mode"),
+        "hold_only": payload.get("hold_only"),
+    }
+    print(json.dumps(health, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Niblit Freqtrade live manager")
     sub    = parser.add_subparsers(dest="command", required=True)
@@ -156,6 +239,12 @@ def main() -> None:
 
     p_balance = sub.add_parser("balance", help="Show balance")
     p_balance.set_defaults(func=cmd_balance)
+
+    p_mode = sub.add_parser("mode", help="Show cognitive runtime mode from signal envelope")
+    p_mode.set_defaults(func=cmd_mode)
+
+    p_health = sub.add_parser("health", help="Show cognitive runtime health snapshot")
+    p_health.set_defaults(func=cmd_health)
 
     args = parser.parse_args()
     args.func(args)

@@ -45,6 +45,16 @@ _DEFAULT_SIGNAL_FILE = os.environ.get(
 
 # Maximum age (seconds) before a signal is considered stale
 _MAX_SIGNAL_AGE_SECS: int = int(os.environ.get("NIBLIT_SIGNAL_MAX_AGE", "300"))
+_REQUIRED_V2_FIELDS = (
+    "schema_version",
+    "signal",
+    "confidence",
+    "timestamp",
+    "forecast_consensus",
+    "governance",
+    "execution",
+    "temporal",
+)
 
 
 class NiblitBridge:
@@ -103,6 +113,9 @@ class NiblitBridge:
         data = self._read()
         if data is None:
             return default
+        execution = data.get("execution", {})
+        if isinstance(execution, dict):
+            return float(execution.get("max_position_size", data.get("risk_pct", default)))
         return float(data.get("risk_pct", default))
 
     def get_regime(self) -> str:
@@ -110,7 +123,7 @@ class NiblitBridge:
         data = self._read()
         if data is None:
             return "ranging"
-        return str(data.get("regime", "ranging"))
+        return str(data.get("market_regime", data.get("regime", "ranging")))
 
     def get_indicator(self, name: str, default: Optional[float] = None) -> Optional[float]:
         """Return a specific indicator value from Niblit's signal payload."""
@@ -143,6 +156,10 @@ class NiblitBridge:
         except (OSError, ValueError, json.JSONDecodeError):
             return None
 
+        data = self._normalize_payload(data)
+        if data is None:
+            return None
+
         # Staleness check
         ts = data.get("timestamp", 0)
         if ts and (now - float(ts)) > self.max_age_secs:
@@ -150,3 +167,86 @@ class NiblitBridge:
 
         self._last_signal = data
         return data
+
+    @staticmethod
+    def _normalize_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return None
+
+        schema_version = str(payload.get("schema_version") or "")
+        if schema_version.startswith("2"):
+            if any(k not in payload for k in _REQUIRED_V2_FIELDS):
+                return None
+            signal = str(payload.get("signal", "HOLD")).upper()
+            out: Dict[str, Any] = dict(payload)
+            out["signal"] = signal if signal in {"BUY", "SELL", "HOLD"} else "HOLD"
+            out["market_regime"] = str(payload.get("market_regime", "ranging"))
+            out["regime"] = out["market_regime"]
+            execution = payload.get("execution", {})
+            if isinstance(execution, dict):
+                out["risk_pct"] = float(execution.get("max_position_size", payload.get("risk_pct", 0.02)))
+            else:
+                out["risk_pct"] = float(payload.get("risk_pct", 0.02))
+            runtime = payload.get("runtime", {})
+            governance = payload.get("governance", {})
+            trace = payload.get("trace", {})
+            if not isinstance(runtime, dict):
+                runtime = {}
+            if not isinstance(governance, dict):
+                governance = {}
+            if not isinstance(trace, dict):
+                trace = {}
+            out["confidence"] = max(0.0, min(1.0, float(payload.get("confidence", 0.5))))
+            out["timestamp"] = int(payload.get("timestamp", 0))
+            out["runtime_mode"] = str(runtime.get("mode", governance.get("governance_mode", "normal"))).lower()
+            out["governance_mode"] = str(governance.get("governance_mode", out["runtime_mode"])).lower()
+            out["causal_trace_id"] = str(trace.get("causal_trace_id", f"trace-{out['timestamp']}"))
+            out["model_consensus"] = max(0.0, min(1.0, float(payload.get("model_consensus", out["confidence"]))))
+            out["strategy_disagreement"] = max(0.0, min(1.0, float(payload.get("strategy_disagreement", 0.0))))
+            return out
+
+        signal = str(payload.get("signal", "HOLD")).upper()
+        confidence = max(0.0, min(1.0, float(payload.get("confidence", 0.5))))
+        regime = str(payload.get("regime", "ranging"))
+        risk_pct = float(payload.get("risk_pct", 0.02))
+        ts = int(payload.get("timestamp", 0))
+        return {
+            **payload,
+            "schema_version": "2.0",
+            "signal": signal if signal in {"BUY", "SELL", "HOLD"} else "HOLD",
+            "confidence": confidence,
+            "timestamp": ts,
+            "market_regime": regime,
+            "regime": regime,
+            "risk_pct": risk_pct,
+            "forecast_consensus": {
+                "direction": "UP" if signal == "BUY" else "DOWN" if signal == "SELL" else "NEUTRAL",
+                "agreement": confidence,
+                "uncertainty": 1.0 - confidence,
+            },
+            "governance": {
+                "constitution_passed": True,
+            },
+            "execution": {
+                "max_position_size": risk_pct,
+            },
+            "temporal": {
+                "coherence_score": 0.7,
+            },
+            "runtime": {
+                "mode": "normal",
+                "health": "legacy",
+                "attention_pressure": 0.2,
+                "runtime_health": 0.8,
+            },
+            "trace": {
+                "causal_trace_id": f"legacy-{ts}",
+                "memory_reference_ids": [],
+                "subsystem_authority": "legacy_signal_bridge",
+            },
+            "model_consensus": confidence,
+            "strategy_disagreement": 0.0,
+            "runtime_mode": "normal",
+            "governance_mode": "normal",
+            "causal_trace_id": f"legacy-{ts}",
+        }
