@@ -101,7 +101,8 @@ class TradeGovernanceGate:
         attention_pressure = float(runtime.get("attention_pressure", 0.2))
         runtime_health = float(runtime.get("runtime_health", 0.8))
         runtime_pressure = float(runtime.get("runtime_pressure", (attention_pressure + float(runtime.get("instability", 0.0))) / 2.0))
-        # Prefer canonical temporal.coherence_drift (Niblit PR #219); fall back to top-level for legacy envelopes
+        # Schema v2 canonical location for coherence_drift is temporal.coherence_drift (Niblit PR #219).
+        # Top-level envelope.coherence_drift is the legacy location kept for backward compatibility.
         coherence_drift = float(temporal.get("coherence_drift", envelope.get("coherence_drift", 0.0)))
         governance_confidence = float(envelope.get("governance_confidence", (float(governance.get("governance_stability", 0.8)) + confidence) / 2.0))
         model_trust = float(envelope.get("model_trust", confidence))

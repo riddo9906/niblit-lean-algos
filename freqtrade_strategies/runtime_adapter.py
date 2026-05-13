@@ -289,6 +289,10 @@ class RuntimeAdapter:
     def status(self) -> Dict[str, Any]:
         """Expose adapter configuration and last known state for observability."""
         state = self._cached_state or _FALLBACK_STATE
+        # The compatibility_metadata fallback stub below is intentionally minimal.
+        # It is only reached when governance_contract.py is missing (e.g. in isolated unit
+        # test environments).  Production deployments MUST have governance_contract.py present
+        # so the full canonical contract is used.
         try:
             from .governance_contract import compatibility_metadata  # noqa: PLC0415
         except ImportError:
@@ -296,7 +300,9 @@ class RuntimeAdapter:
                 from governance_contract import compatibility_metadata  # noqa: PLC0415
             except ImportError:
                 def compatibility_metadata(overrides=None):  # type: ignore[misc]
-                    return {"schema_version": "2.x", "event_contract_version": "omega-7"}
+                    raise ImportError(
+                        "governance_contract.py not found — cannot guarantee canonical compatibility metadata"
+                    )
         return {
             "cloud_url": self.cloud_url or "(none)",
             "cloud_timeout_s": self.cloud_timeout_s,
