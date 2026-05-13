@@ -36,11 +36,17 @@ import base64
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import urllib.error
 import urllib.request
+
+try:
+    from dotenv import load_dotenv as _dotenv_load_dotenv  # type: ignore[import]
+except ImportError:
+    _dotenv_load_dotenv = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,15 +62,11 @@ def _load_dotenv(env_file: Path) -> None:
     """
     if not env_file.exists():
         return
-    try:
-        from dotenv import load_dotenv  # type: ignore[import]
-        load_dotenv(dotenv_path=env_file, override=False)
+    if _dotenv_load_dotenv is not None:
+        _dotenv_load_dotenv(dotenv_path=env_file, override=False)
         return
-    except ImportError:
-        pass
 
     # Minimal fallback parser (handles KEY=VALUE, KEY="VALUE", KEY='VALUE')
-    import re
     _line_re = re.compile(
         r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\r\n]*))\s*$"""
     )
@@ -155,7 +157,7 @@ def load_credentials(
 # QCClient
 # ─────────────────────────────────────────────────────────────────────────────
 
-class QCClient:
+class QCClient:  # pylint: disable=too-many-public-methods
     """Thin wrapper around the QuantConnect REST API v2.
 
     Parameters

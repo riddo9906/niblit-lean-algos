@@ -64,7 +64,7 @@ def run_backtest(strategy: str, config: Path, timerange: str,
     print(f"Command:     {' '.join(cmd)}")
     print(f"{'='*60}")
 
-    result = subprocess.run(cmd, capture_output=False, text=True)
+    result = subprocess.run(cmd, capture_output=False, text=True, check=False)
     return {"strategy": strategy, "returncode": result.returncode,
             "timerange": timerange}
 

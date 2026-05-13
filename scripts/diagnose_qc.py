@@ -22,8 +22,10 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from qc_client import QCClient, QC_API_BASE  # noqa: E402
+try:
+    from scripts.qc_client import QCClient
+except ImportError:
+    from qc_client import QCClient
 
 
 def _ok(msg: str) -> None:

@@ -117,12 +117,12 @@ def cmd_start(args: argparse.Namespace) -> None:
     os.execvpe("freqtrade", cmd, env)  # replace current process
 
 
-def cmd_stop(args: argparse.Namespace) -> None:
+def cmd_stop(_args: argparse.Namespace) -> None:
     result = _ft_request("POST", "/stop")
     print(json.dumps(result, indent=2))
 
 
-def cmd_status(args: argparse.Namespace) -> None:
+def cmd_status(_args: argparse.Namespace) -> None:
     result = _ft_request("GET", "/status")
     print(json.dumps(result, indent=2))
 
@@ -132,7 +132,7 @@ def cmd_trades(args: argparse.Namespace) -> None:
     print(json.dumps(result, indent=2))
 
 
-def cmd_balance(args: argparse.Namespace) -> None:
+def cmd_balance(_args: argparse.Namespace) -> None:
     result = _ft_request("GET", "/balance")
     print(json.dumps(result, indent=2))
 
@@ -187,11 +187,11 @@ def _load_signal_payload() -> Dict[str, Any]:
     }
 
 
-def cmd_mode(args: argparse.Namespace) -> None:
+def cmd_mode(_args: argparse.Namespace) -> None:
     print(json.dumps(_load_signal_payload(), indent=2))
 
 
-def cmd_health(args: argparse.Namespace) -> None:
+def cmd_health(_args: argparse.Namespace) -> None:
     payload = _load_signal_payload()
     if payload.get("status") != "ok":
         print(json.dumps(payload, indent=2))
