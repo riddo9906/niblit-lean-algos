@@ -61,7 +61,7 @@ def run_hyperopt(strategy: str, config: Path, epochs: int,
     print(f"Command:  {' '.join(cmd)}")
     print(f"{'='*60}")
 
-    result = subprocess.run(cmd, capture_output=False, text=True)
+    result = subprocess.run(cmd, capture_output=False, text=True, check=False)
     return result.returncode
 
 

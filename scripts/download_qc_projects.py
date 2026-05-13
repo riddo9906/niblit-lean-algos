@@ -24,9 +24,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Allow running as `python scripts/download_qc_projects.py` from repo root.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from qc_client import QCClient  # noqa: E402
+try:
+    from scripts.qc_client import QCClient
+except ImportError:
+    from qc_client import QCClient
 
 
 # ─────────────────────────────────────────────────────────────────────────────

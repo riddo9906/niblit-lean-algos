@@ -60,7 +60,7 @@ def download(pairs: list[str], timeframes: list[str], days: int, config: Path) -
     ]
 
     print(f"\n{'='*60}")
-    print(f"Downloading data:")
+    print("Downloading data:")
     print(f"  Pairs      : {', '.join(pairs)}")
     print(f"  Timeframes : {', '.join(timeframes)}")
     print(f"  Days       : {days}")
@@ -68,7 +68,7 @@ def download(pairs: list[str], timeframes: list[str], days: int, config: Path) -
     print(f"  Command    : {' '.join(cmd)}")
     print(f"{'='*60}\n")
 
-    result = subprocess.run(cmd, capture_output=False)
+    result = subprocess.run(cmd, capture_output=False, check=False)
     return result.returncode
 
 

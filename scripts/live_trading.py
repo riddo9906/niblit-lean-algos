@@ -51,8 +51,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from qc_client import QCClient  # noqa: E402
+try:
+    from scripts.qc_client import QCClient
+except ImportError:
+    from qc_client import QCClient
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
