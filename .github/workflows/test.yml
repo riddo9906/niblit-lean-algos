@@ -10,6 +10,10 @@ on:
       - master
       - main
 
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Run test suite
@@ -122,3 +126,50 @@ jobs:
           else
             echo "tests/ not found — skipping"
           fi
+
+      - name: Governance contract anti-drift validation
+        run: |
+          python - <<'EOF'
+          import sys
+          sys.path.insert(0, '.')
+          from freqtrade_strategies.governance_contract import (
+              GOVERNANCE_RUNTIME_MODES,
+              CANONICAL_EVENTS,
+              compatibility_metadata,
+              anti_drift_report,
+              NODE_IDENTITY,
+          )
+
+          # Validate canonical mode contract
+          assert set(GOVERNANCE_RUNTIME_MODES) == {"normal", "cautious", "survival", "lockdown"}, \
+              f"Mode contract drift: {GOVERNANCE_RUNTIME_MODES}"
+
+          # Validate canonical event names are present
+          required_events = {
+              "execution_envelope.published",
+              "trade_reflection.ingested",
+              "market_episode.ingested",
+              "runtime_mode.changed",
+              "reflection.complete",
+          }
+          missing_events = required_events - CANONICAL_EVENTS
+          assert not missing_events, f"Missing canonical events: {missing_events}"
+
+          # Validate compatibility metadata keys
+          meta = compatibility_metadata()
+          assert meta.get("schema_version") == "2.x", f"schema_version drift: {meta.get('schema_version')}"
+          assert meta.get("event_contract_version") == "omega-7", f"event_contract_version drift"
+          assert meta.get("runtime_mode_contract") == "2026.05", f"runtime_mode_contract drift"
+          assert meta.get("node_identity") == NODE_IDENTITY, f"node_identity missing"
+
+          # Validate anti-drift report on clean envelope returns low risk
+          clean_env = {
+              "schema_version": "2.0", "signal": "BUY", "confidence": 0.7, "timestamp": 1000,
+              "forecast_consensus": {}, "governance": {"governance_mode": "normal"},
+              "runtime": {"mode": "normal"}, "temporal": {}, "resources": {},
+          }
+          report = anti_drift_report(envelope=clean_env)
+          assert report["drift_risk"] == "low", f"Unexpected drift risk: {report['drift_risk']}, factors: {report['drift_factors']}"
+
+          print(f"Governance contract anti-drift validation PASSED — node: {NODE_IDENTITY}")
+          EOF

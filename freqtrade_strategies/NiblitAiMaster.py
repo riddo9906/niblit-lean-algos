@@ -56,6 +56,24 @@ _EPISODES_FILE = os.environ.get(
     os.path.join(os.environ.get("TMPDIR", "/tmp"), "niblit_market_episodes.jsonl"),
 )
 
+try:
+    from .governance_contract import (  # noqa: E402
+        EVENT_TRADE_REFLECTION_INGESTED,
+        EVENT_MARKET_EPISODE_INGESTED,
+        EVENT_REFLECTION_COMPLETE,
+    )
+except ImportError:
+    try:
+        from governance_contract import (  # noqa: E402
+            EVENT_TRADE_REFLECTION_INGESTED,
+            EVENT_MARKET_EPISODE_INGESTED,
+            EVENT_REFLECTION_COMPLETE,
+        )
+    except ImportError:
+        EVENT_TRADE_REFLECTION_INGESTED = "trade_reflection.ingested"
+        EVENT_MARKET_EPISODE_INGESTED = "market_episode.ingested"
+        EVENT_REFLECTION_COMPLETE = "reflection.complete"
+
 
 class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     """Niblit AI Master — Freqtrade edition."""
@@ -295,7 +313,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
 
     def _emit_reflection_event(self, results: dict) -> None:
         event = {
-            "event": "trade_reflection",
+            "event": EVENT_TRADE_REFLECTION_INGESTED,
             "timestamp": results.get("timestamp"),
             "decision": results.get("governance_decision", {}),
             "regime": results.get("niblit_regime"),
@@ -323,7 +341,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
         }
         self._append_jsonl(_REFLECTION_FILE, event)
         self._append_jsonl(_EPISODES_FILE, {
-            "event": "reflection_reconciliation",
+            "event": EVENT_REFLECTION_COMPLETE,
             "timestamp": results.get("timestamp"),
             "regime": results.get("niblit_regime"),
             "causal_trace_id": results.get("causal_trace_id"),
@@ -340,7 +358,7 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
         advisors = envelope.get("advisors", {})
         governance = envelope.get("governance", {})
         episode = {
-            "event": "market_episode",
+            "event": EVENT_MARKET_EPISODE_INGESTED,
             "timestamp": results.get("timestamp"),
             "regime": regime,
             "scenario": envelope.get("world_model", {}).get("scenario", "unknown"),

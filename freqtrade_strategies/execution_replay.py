@@ -35,6 +35,31 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
+try:
+    from .governance_contract import (
+        NODE_IDENTITY,
+        TRACE_SCHEMA_VERSION as _CONTRACT_TRACE_VERSION,
+        compatibility_metadata,
+        normalize_replay_metadata,
+    )
+except (ImportError, AttributeError):
+    try:
+        from governance_contract import (
+            NODE_IDENTITY,
+            compatibility_metadata,
+            normalize_replay_metadata,
+        )
+        _CONTRACT_TRACE_VERSION = None
+    except ImportError:
+        NODE_IDENTITY = "niblit_lean_algos"
+        _CONTRACT_TRACE_VERSION = None
+
+        def compatibility_metadata(overrides=None):  # type: ignore[misc]
+            return {"schema_version": "2.x", "event_contract_version": "omega-7", "node_identity": NODE_IDENTITY}
+
+        def normalize_replay_metadata(payload):  # type: ignore[misc]
+            return dict(payload or {})
+
 logger = logging.getLogger(__name__)
 
 _TRACE_FILE: str = os.environ.get(
@@ -193,7 +218,8 @@ def write_execution_trace(
             "coherence": coherence,
             "agreement": _clamp(forecast.get("agreement", confidence)),
             "uncertainty": _clamp(forecast.get("uncertainty", 1.0 - confidence)),
-            "coherence_drift": _clamp(envelope.get("coherence_drift", 0.0)),
+            # prefer temporal.coherence_drift (canonical per PR #219), fall back to top-level
+            "coherence_drift": _clamp(temporal.get("coherence_drift", envelope.get("coherence_drift", 0.0))),
             "model_trust": _clamp(envelope.get("model_trust", 0.8)),
         },
         "resource_state": {
@@ -204,8 +230,9 @@ def write_execution_trace(
         },
         "execution_reasoning": reasoning,
         "causal_references": list(trace_meta.get("memory_reference_ids", [])),
-        "subsystem_authority": str(trace_meta.get("subsystem_authority", "trading_brain")),
+        "subsystem_authority": str(trace_meta.get("subsystem_authority", NODE_IDENTITY)),
         "envelope_schema_version": str(envelope.get("schema_version", "unknown")),
+        "compatibility": compatibility_metadata(),
     }
 
     try:
@@ -281,4 +308,9 @@ class ExecutionReplayWriter:
             size = os.path.getsize(self.trace_file)
         except OSError:
             pass
-        return {"trace_file": self.trace_file, "file_size_bytes": size}
+        return {
+            "trace_file": self.trace_file,
+            "file_size_bytes": size,
+            "node_identity": NODE_IDENTITY,
+            "compatibility": compatibility_metadata(),
+        }

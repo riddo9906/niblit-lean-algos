@@ -128,7 +128,8 @@ def _parse_envelope_into_state(payload: Dict[str, Any], source: str) -> RuntimeS
         governance_mode = "cautious"
 
     coherence = _clamp(temporal.get("coherence_score", 0.7))
-    coherence_drift_raw = payload.get("coherence_drift", 0.0)
+    # prefer temporal.coherence_drift (canonical per PR #219); fall back to top-level for legacy envelopes
+    coherence_drift_raw = temporal.get("coherence_drift", payload.get("coherence_drift", 0.0))
     coherence_drift = _clamp(coherence_drift_raw)
 
     runtime_health = _clamp(runtime.get("runtime_health", 0.8))
@@ -270,6 +271,9 @@ class RuntimeAdapter:
         if cloud_authority or temporal.get("epoch_id", 0) == 0:
             if state.epoch_id > 0:
                 temporal["epoch_id"] = state.epoch_id
+        # sync coherence_drift to canonical location inside temporal (Niblit PR #219)
+        if cloud_authority or "coherence_drift" not in temporal:
+            temporal["coherence_drift"] = state.coherence_drift
         env["temporal"] = temporal
 
         governance = dict(env.get("governance") or {})
@@ -285,6 +289,14 @@ class RuntimeAdapter:
     def status(self) -> Dict[str, Any]:
         """Expose adapter configuration and last known state for observability."""
         state = self._cached_state or _FALLBACK_STATE
+        try:
+            from .governance_contract import compatibility_metadata  # noqa: PLC0415
+        except ImportError:
+            try:
+                from governance_contract import compatibility_metadata  # noqa: PLC0415
+            except ImportError:
+                def compatibility_metadata(overrides=None):  # type: ignore[misc]
+                    return {"schema_version": "2.x", "event_contract_version": "omega-7"}
         return {
             "cloud_url": self.cloud_url or "(none)",
             "cloud_timeout_s": self.cloud_timeout_s,
@@ -293,6 +305,9 @@ class RuntimeAdapter:
             "refresh_interval_s": self.refresh_interval_s,
             "cloud_runtime_path": self.cloud_runtime_path,
             "last_state": state.to_dict(),
+            "node_identity": "niblit_lean_algos",
+            "topology": "execution-node",
+            "compatibility": compatibility_metadata(),
         }
 
     # ── internal probing ──────────────────────────────────────────────────────

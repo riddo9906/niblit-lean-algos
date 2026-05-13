@@ -85,13 +85,14 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
                 "epoch_id": int(source.get("timestamp", 0)),
                 "coherence_score": 0.7,
                 "epoch_alignment": "aligned",
+                "coherence_drift": 0.0,
             },
             "runtime": {
                 "mode": "normal",
-                "health": "unknown",
+                "health": "ok",
                 "instability": 0.0,
-                "attention_pressure": 0.2,
-                "runtime_health": 0.8,
+                "attention_pressure": 0.0,
+                "runtime_health": 1.0,
             },
             "risk": {
                 "emergence_risk": 0.0,
@@ -156,10 +157,10 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         "governance": {
             "constitution_passed": bool(governance.get("constitution_passed", True)),
             "risk_tier": str(governance.get("risk_tier", "medium")),
-            "authority": str(governance.get("authority", "trading_brain")),
+            "authority": str(governance.get("authority", "niblit_lean_algos")),
             "survival_mode": bool(governance.get("survival_mode", False)),
             "governance_mode": str(governance.get("governance_mode", "normal")).lower(),
-            "governance_stability": max(0.0, min(1.0, float(governance.get("governance_stability", 0.8)))),
+            "governance_stability": max(0.0, min(1.0, float(governance.get("governance_stability", 1.0)))),
             "current_drawdown_pct": max(0.0, float(governance.get("current_drawdown_pct", 0.0))),
             "max_drawdown_pct": max(0.0, float(governance.get("max_drawdown_pct", 0.12))),
         },
@@ -176,13 +177,26 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
             "coherence_score": max(0.0, min(1.0, float(temporal.get("coherence_score", 0.7)))),
             "epoch_alignment": str(temporal.get("epoch_alignment", "aligned")),
             "temporal_epoch": int(temporal.get("temporal_epoch", temporal.get("epoch_id", normalized.get("epoch", normalized.get("timestamp", 0))))),
+            # canonical location per schema-v2 (Niblit PR #219): coherence_drift lives inside temporal
+            "coherence_drift": max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        temporal.get(
+                            "coherence_drift",
+                            normalized.get("coherence_drift", 0.0),
+                        )
+                    ),
+                ),
+            ),
         },
         "runtime": {
             "mode": str(runtime.get("mode", "normal")).lower(),
-            "health": str(runtime.get("health", "unknown")),
+            "health": str(runtime.get("health", "ok")),
             "instability": max(0.0, min(1.0, float(runtime.get("instability", 0.0)))),
-            "attention_pressure": max(0.0, min(1.0, float(runtime.get("attention_pressure", 0.2)))),
-            "runtime_health": max(0.0, min(1.0, float(runtime.get("runtime_health", 0.8)))),
+            "attention_pressure": max(0.0, min(1.0, float(runtime.get("attention_pressure", 0.0)))),
+            "runtime_health": max(0.0, min(1.0, float(runtime.get("runtime_health", 1.0)))),
             "runtime_pressure": max(
                 0.0,
                 min(
@@ -218,12 +232,24 @@ def normalize_envelope(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         "trace": {
             "causal_trace_id": str((normalized.get("trace") or {}).get("causal_trace_id", f"trace-{int(normalized.get('timestamp', 0))}")),
             "memory_reference_ids": list((normalized.get("trace") or {}).get("memory_reference_ids", [])),
-            "subsystem_authority": str((normalized.get("trace") or {}).get("subsystem_authority", "trading_brain")),
+            "subsystem_authority": str((normalized.get("trace") or {}).get("subsystem_authority", "niblit_lean_algos")),
         },
         "model_consensus": max(0.0, min(1.0, float(normalized.get("model_consensus", confidence)))),
         "strategy_disagreement": max(0.0, min(1.0, float(normalized.get("strategy_disagreement", 0.0)))),
         "governance_mode": str(normalized.get("governance_mode", (governance or {}).get("governance_mode", "normal"))).lower(),
-        "coherence_drift": max(0.0, min(1.0, float(normalized.get("coherence_drift", 0.0)))),
+        # Top-level coherence_drift kept for backward compat; canonical location is temporal.coherence_drift
+        "coherence_drift": max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    temporal.get(
+                        "coherence_drift",
+                        normalized.get("coherence_drift", 0.0),
+                    )
+                ),
+            ),
+        ),
         "governance_confidence": max(
             0.0,
             min(

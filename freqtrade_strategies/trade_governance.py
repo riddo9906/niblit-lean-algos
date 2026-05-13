@@ -101,7 +101,8 @@ class TradeGovernanceGate:
         attention_pressure = float(runtime.get("attention_pressure", 0.2))
         runtime_health = float(runtime.get("runtime_health", 0.8))
         runtime_pressure = float(runtime.get("runtime_pressure", (attention_pressure + float(runtime.get("instability", 0.0))) / 2.0))
-        coherence_drift = float(envelope.get("coherence_drift", 0.0))
+        # Prefer canonical temporal.coherence_drift (Niblit PR #219); fall back to top-level for legacy envelopes
+        coherence_drift = float(temporal.get("coherence_drift", envelope.get("coherence_drift", 0.0)))
         governance_confidence = float(envelope.get("governance_confidence", (float(governance.get("governance_stability", 0.8)) + confidence) / 2.0))
         model_trust = float(envelope.get("model_trust", confidence))
         execution_risk = float(envelope.get("execution_risk", emergence_risk))
