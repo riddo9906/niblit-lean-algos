@@ -289,7 +289,7 @@ class MyStrategy(NiblitSignalMixin, IStrategy):
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
 | `NIBLIT_SIGNAL_FILE` | `/tmp/niblit_lean_signal.json` | Path to Niblit cognitive envelope JSON |
 | `NIBLIT_SIGNAL_MAX_AGE` | `300` | Max signal age in seconds before stale |
-| `NIBLIT_CLOUD_RUNTIME_URL` | — | Optional cloud runtime coordination endpoint (adapter probes `/niblit/runtime`) |
+| `NIBLIT_CLOUD_RUNTIME_URL` | — | Optional cloud runtime coordination endpoint (adapter probes `/v1/runtime/envelope`; legacy `/niblit/runtime` also supported) |
 | `NIBLIT_CLOUD_RUNTIME_TIMEOUT` | `3.0` | Cloud runtime probe timeout (seconds) |
 | `NIBLIT_CLOUD_RUNTIME_MAX_AGE` | `120` | Max cloud runtime snapshot age in seconds |
 | `NIBLIT_ADAPTER_REFRESH_S` | `5.0` | Runtime adapter cache refresh interval |

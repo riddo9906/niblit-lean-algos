@@ -54,7 +54,7 @@ _REFRESH_INTERVAL_S: float = float(os.environ.get("NIBLIT_ADAPTER_REFRESH_S", "5
 _COHERENCE_DRIFT_THRESHOLD: float = float(
     os.environ.get("NIBLIT_COHERENCE_DRIFT_THRESHOLD", "0.10")
 )
-_CLOUD_RUNTIME_PATH: str = os.environ.get("NIBLIT_CLOUD_RUNTIME_PATH", "/niblit/runtime")
+_CLOUD_RUNTIME_PATH: str = os.environ.get("NIBLIT_CLOUD_RUNTIME_PATH", "/v1/runtime/envelope")
 
 
 @dataclass
@@ -202,7 +202,7 @@ class RuntimeAdapter:
         self.cloud_max_age_s = cloud_max_age_s
         self.local_max_age_s = local_max_age_s
         self.refresh_interval_s = refresh_interval_s
-        self.cloud_runtime_path = cloud_runtime_path or "/niblit/runtime"
+        self.cloud_runtime_path = cloud_runtime_path or "/v1/runtime/envelope"
 
         self._cached_state: Optional[RuntimeState] = None
         self._last_refresh: float = 0.0
