@@ -1,0 +1,19 @@
+{
+  "decision_id": "example-001",
+  "symbol": "BTC/USDT",
+  "action": "enter_long",
+  "confidence": 0.75,
+  "rationale": "Strong upward momentum detected with increasing volume",
+  "strategy": "EmaTripleCross",
+  "stake_amount": 50.0,
+  "stake_currency": "USDT",
+  "order_type": "market",
+  "limit_price": null,
+  "stop_loss": 0.03,
+  "take_profit": 0.08,
+  "leverage": 1.0,
+  "metadata": {
+    "source": "niblit-cognitive-layer",
+    "timeframe": "1h"
+  }
+}

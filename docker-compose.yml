@@ -1,0 +1,59 @@
+version: "3.8"
+
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    container_name: niblit-freqtrade
+    restart: unless-stopped
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ./config:/freqtrade/config
+    ports:
+      - "8080:8080"
+    command: ["freqtrade", "trade", "--config", "/freqtrade/config/config.json"]
+    depends_on:
+      - qdrant
+    environment:
+      - FREQTRADE__EXCHANGE__NAME=${FREQTRADE_EXCHANGE:-binance}
+      - FREQTRADE__EXCHANGE__KEY=${FREQTRADE_KEY}
+      - FREQTRADE__EXCHANGE__SECRET=${FREQTRADE_SECRET}
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: niblit-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  redis:
+    image: redis:alpine
+    container_name: niblit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  bridge:
+    build:
+      context: .
+      dockerfile: freqtrade_bridge/Dockerfile
+    container_name: niblit-bridge
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./bridge_state:/app/state
+    depends_on:
+      - freqtrade
+      - qdrant
+      - redis
+    environment:
+      - NIBLIT_SIGNAL_FILE=/app/state/signal.json
+      - NIBLIT_EXECUTION_MODE=${NIBLIT_EXECUTION_MODE:-dry_run}
+      - FREQTRADE_HOST=freqtrade
+      - REDIS_URL=redis://redis:6379
+
+volumes:
+  qdrant_data:

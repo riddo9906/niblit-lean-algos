@@ -1,0 +1,1 @@
+"""Paper trading adapter package."""

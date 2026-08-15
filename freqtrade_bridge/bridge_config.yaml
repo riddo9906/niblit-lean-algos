@@ -1,0 +1,35 @@
+# Freqtrade-Lean Bridge Configuration
+# Environment variables override these values
+
+execution:
+  mode: dry_run
+  exchange: bybit
+  dry_run_wallet: 1000.0
+  max_slippage_bps: 10.0
+
+freqtrade:
+  host: localhost
+  port: 8080
+
+lean:
+  signal_transport: file
+  signal_file: /tmp/niblit_lean_signal.json
+  max_signal_age_secs: 300
+
+risk:
+  max_drawdown: 0.10
+  max_daily_loss: 0.03
+  max_position_size: 0.10
+  max_leverage: 3.0
+  use_kelly_sizing: false
+  use_volatility_sizing: true
+
+ai:
+  confidence_threshold: 0.70
+  use_ai_stance: true
+  cooldown_secs: 60
+
+prometheus:
+  enabled: true
+  port: 9090
+  endpoint: /metrics

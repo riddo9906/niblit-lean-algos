@@ -1,0 +1,1 @@
+"""Freqtrade adapter package."""
