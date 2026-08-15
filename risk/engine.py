@@ -70,6 +70,24 @@ class RiskEngine:
         if len(symbol_positions) >= self._policy.maximum_positions_per_symbol:
             violations.append("maximum_positions_per_symbol_exceeded")
 
+        # Maximum total exposure — must be enforced (fail closed when portfolio
+        # cannot be valued). Exposure = committed stake / portfolio value.
+        stake = decision.stake_amount or 0.0
+        if portfolio_value > 0:
+            existing_exposure = sum(
+                float(getattr(p, "stake_amount", 0.0) or 0.0) for p in open_positions
+            )
+            proposed_exposure = existing_exposure + stake
+            exposure_ratio = proposed_exposure / portfolio_value
+            if exposure_ratio > self._policy.maximum_total_exposure:
+                violations.append("maximum_total_exposure_exceeded")
+                warnings.append(
+                    f"total_exposure={exposure_ratio:.3f} max={self._policy.maximum_total_exposure:.3f}"
+                )
+        elif decision.action != "hold":
+            # Cannot value portfolio → unknown exposure → fail closed.
+            violations.append("portfolio_value_unknown")
+
         # Stake sizing
         stake = decision.stake_amount or 0.0
         if stake <= 0:

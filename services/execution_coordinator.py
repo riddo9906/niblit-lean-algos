@@ -20,6 +20,16 @@ from .decision_validator import DecisionValidator
 log = logging.getLogger("ExecutionCoordinator")
 
 
+def _result_dict(result: "ExecutionResult") -> dict:
+    return {
+        "success": result.success,
+        "status": result.status,
+        "error": result.error,
+        "provider_trade_id": result.provider_trade_id,
+        "raw": result.raw,
+    }
+
+
 class ExecutionCoordinator:
     """Coordinates validation → risk → execution for trading decisions.
 
@@ -63,10 +73,20 @@ class ExecutionCoordinator:
         require_market_state: bool = False,
     ) -> ExecutionResult:
         if self._repository.has_decision(decision.decision_id):
+            # Persistent idempotency: any in-flight or terminal record blocks a
+            # second provider submission. Return structured existing-execution info.
+            existing = self._repository.get_execution(decision.decision_id) or {}
             return ExecutionResult(
                 success=False,
                 status="duplicate",
                 error=f"Decision {decision.decision_id} already executed",
+                raw={
+                    "decision_id": decision.decision_id,
+                    "duplicate": True,
+                    "existing_status": existing.get("status"),
+                    "provider_trade_id": existing.get("provider_trade_id"),
+                    "reconciliation_status": existing.get("reconciliation_status"),
+                },
             )
 
         validation = self._validator.validate(
@@ -116,7 +136,10 @@ class ExecutionCoordinator:
         mode_error = self._check_execution_mode(decision, command)
         if mode_error:
             log.info("[Trading] Execution: blocked by observe mode")
-            return ExecutionResult(success=False, status="execution_blocked", error=mode_error)
+            # Deterministic blockage — no provider call, no execution record.
+            return ExecutionResult(
+                success=False, status="execution_blocked", error=mode_error
+            )
 
         # Adapter health must be verified before any order request is sent.
         try:
@@ -124,41 +147,105 @@ class ExecutionCoordinator:
             healthy = bool(getattr(adapter_health, "healthy", False))
         except Exception as exc:
             log.warning("[Trading] Adapter health check failed: %s", exc)
-            return ExecutionResult(
-                success=False,
+            return self._reject(
+                decision, command, "adapter_unavailable", str(exc),
                 status="adapter_unavailable",
-                error=str(exc),
             )
         if not healthy:
-            return ExecutionResult(
-                success=False,
+            return self._reject(
+                decision, command, "adapter_unavailable",
+                getattr(adapter_health, "error", None) or "adapter unhealthy",
                 status="adapter_unavailable",
-                error=getattr(adapter_health, "error", None) or "adapter unhealthy",
             )
 
-        self._repository.record_request(decision.decision_id, vars(command), "freqtrade")
+        # Remote provider gate — verified from the provider payload immediately
+        # before submission. Fail closed on any uncertainty.
+        gate = getattr(self._adapter, "verify_execution_gate", None)
+        if callable(gate):
+            try:
+                gate_ok, gate_error = await gate(command)  # type: ignore[operator]
+            except Exception as exc:
+                gate_ok, gate_error = False, f"execution_gate_error:{exc}"
+            if not gate_ok:
+                return self._reject(
+                    decision, command, "execution_blocked", gate_error
+                )
+
+        # Persist a grounded execution record, then move to submitting
+        # (distinct from submitted — acceptance is only proven by the provider
+        # response below).
+        provider_tag = decision.provider_entry_tag() if decision.decision_id else None
+        self._repository.record_request(
+            decision.decision_id, vars(command), "freqtrade",
+            execution_mode=self._execution_mode,
+            validation_result={
+                "valid": True,
+                "errors": [],
+                "warnings": validation.warnings,
+            },
+            risk_result={
+                "approved": True,
+                "risk_score": risk.risk_score,
+                "violations": risk.violations,
+                "warnings": risk.warnings,
+            },
+            provider_tag=provider_tag,
+            status="received",
+        )
+        self._repository.mark_submitting(decision.decision_id)
+        if risk.adjusted_stake_amount is not None:
+            self._repository.mark_status(
+                decision.decision_id, "submitting",
+                adjusted_stake=risk.adjusted_stake_amount,
+            )
 
         try:
             result = await self._adapter.execute_order(command)
-            self._repository.record_result(
-                decision.decision_id,
-                vars(result),
-                result.provider_trade_id,
-                result.status,
-            )
-            return result
         except Exception as exc:
-            self._repository.record_result(
-                decision.decision_id,
-                {"error": str(exc)},
-                None,
-                "error",
-            )
+            log.error("[Trading] Execution provider error: %s", exc)
+            self._repository.mark_failed(decision.decision_id, error_category="execution_error")
             return ExecutionResult(
                 success=False,
                 status="execution_error",
                 error=str(exc),
+                raw={"decision_id": decision.decision_id, "provider_tag": provider_tag},
             )
+
+        if result.status == "ambiguous":
+            # Provider outcome unknown (e.g. timeout after receipt). Do NOT
+            # retry. Persist ambiguous and rely on reconciliation.
+            self._repository.mark_ambiguous(decision.decision_id, _result_dict(result))
+            return result
+
+        if result.success:
+            tag_from_result = None
+            if isinstance(result.raw, dict):
+                tag_from_result = result.raw.get("provider_tag")
+            self._repository.mark_submitted(
+                decision.decision_id,
+                _result_dict(result),
+                result.provider_trade_id,
+                provider_tag=tag_from_result or provider_tag,
+            )
+        else:
+            self._repository.mark_failed(decision.decision_id, error_category="provider_rejected")
+        return result
+
+    def _reject(
+        self,
+        decision: TradingDecision,
+        command: ExecutionCommand,
+        error_category: str,
+        reason: str,
+        status: str = "execution_blocked",
+    ) -> ExecutionResult:
+        """Return a deterministic rejection (NO provider order call, no record)."""
+        return ExecutionResult(
+            success=False,
+            status=status,
+            error=reason,
+            raw={"error_category": error_category, "decision_id": decision.decision_id},
+        )
 
     def _check_execution_mode(self, decision: TradingDecision, command: ExecutionCommand) -> Optional[str]:
         """Enforce observe / paper / live safety modes."""

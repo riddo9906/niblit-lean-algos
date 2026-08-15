@@ -15,6 +15,33 @@ from services.market_symbol import MarketSymbolError
 log = logging.getLogger("TradingAPI")
 
 
+def _public_execution(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Project an execution record to a safe public dict (no secrets)."""
+    return {
+        "decision_id": rec.get("decision_id"),
+        "schema_version": rec.get("schema_version"),
+        "backend": rec.get("backend"),
+        "execution_mode": rec.get("execution_mode"),
+        "symbol": rec.get("symbol"),
+        "action": rec.get("action"),
+        "requested_stake": rec.get("requested_stake"),
+        "adjusted_stake": rec.get("adjusted_stake"),
+        "leverage": rec.get("leverage"),
+        "provider_trade_id": rec.get("provider_trade_id"),
+        "provider_order_id": rec.get("provider_order_id"),
+        "provider_tag": rec.get("provider_tag"),
+        "status": rec.get("status"),
+        "reconciliation_status": rec.get("reconciliation_status"),
+        "last_reconciled_at": rec.get("last_reconciled_at"),
+        "error_category": rec.get("error_category"),
+        "request_timestamp": rec.get("request_timestamp"),
+        "response_timestamp": rec.get("response_timestamp"),
+        "validation_result": rec.get("validation_result"),
+        "risk_result": rec.get("risk_result"),
+        "result": rec.get("result"),
+    }
+
+
 class DecisionRequest(BaseModel):
     decision_id: str
     symbol: str
@@ -334,12 +361,98 @@ def create_app(manager: TradingRuntimeManager) -> FastAPI:
     async def execute_decision(req: DecisionRequest) -> Dict[str, Any]:
         decision = TradingDecision(**req.model_dump())
         result = await manager.execute_decision(decision)
+        raw = result.raw if isinstance(result.raw, dict) else {}
+        existing = None
+        if result.status == "duplicate":
+            repo = getattr(manager, "_repository", None)
+            if repo is not None:
+                existing = repo.get_execution(decision.decision_id)
         return {
+            "decision_id": decision.decision_id,
             "success": result.success,
             "status": result.status,
             "error": result.error,
             "trade_id": result.provider_trade_id,
+            "execution_state": result.status,
+            "provider_trade_id": result.provider_trade_id,
+            "reconciliation_state": (existing or {}).get("reconciliation_status")
+            if existing else raw.get("reconciliation_status"),
+            "duplicate": result.status == "duplicate",
+            "backend": manager.backend,
+            "mode": manager.execution_mode,
         }
+
+    # ── Execution diagnostics (read-only) ────────────────────────────────────
+
+    @app.get("/v1/executions")
+    async def list_executions(
+        limit: int = Query(50, ge=1, le=500),
+        status: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        repo = getattr(manager, "_repository", None)
+        if repo is None:
+            return {"executions": []}
+        rows = repo.list_executions(limit=limit, status=status, symbol=symbol)
+        return {
+            "executions": [
+                {
+                    "decision_id": r.get("decision_id"),
+                    "symbol": r.get("symbol"),
+                    "action": r.get("action"),
+                    "status": r.get("status"),
+                    "reconciliation_status": r.get("reconciliation_status"),
+                    "provider_trade_id": r.get("provider_trade_id"),
+                    "provider_tag": r.get("provider_tag"),
+                    "request_timestamp": r.get("request_timestamp"),
+                    "response_timestamp": r.get("response_timestamp"),
+                }
+                for r in rows
+            ]
+        }
+
+    @app.get("/v1/executions/{decision_id}")
+    async def get_execution(decision_id: str) -> Dict[str, Any]:
+        repo = getattr(manager, "_repository", None)
+        if repo is None:
+            raise HTTPException(status_code=404, detail="repository unavailable")
+        rec = repo.get_execution(decision_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"No execution for {decision_id}")
+        return _public_execution(rec)
+
+    @app.get("/v1/executions/{decision_id}/reconciliation")
+    async def get_reconciliation(decision_id: str) -> Dict[str, Any]:
+        repo = getattr(manager, "_repository", None)
+        if repo is None:
+            raise HTTPException(status_code=404, detail="repository unavailable")
+        rec = repo.get_execution(decision_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"No execution for {decision_id}")
+        return {
+            "decision_id": decision_id,
+            "status": rec.get("status"),
+            "reconciliation_status": rec.get("reconciliation_status"),
+            "last_reconciled_at": rec.get("last_reconciled_at"),
+            "provider_trade_id": rec.get("provider_trade_id"),
+            "provider_tag": rec.get("provider_tag"),
+            "result": rec.get("result"),
+        }
+
+    @app.post("/v1/executions/{decision_id}/reconcile")
+    async def reconcile_execution(decision_id: str) -> Dict[str, Any]:
+        """Read-only reconciliation. Never submits a trade."""
+        from services.execution_reconciler import ExecutionReconciler
+
+        repo = getattr(manager, "_repository", None)
+        adapter = getattr(manager, "_adapter", None)
+        if repo is None or adapter is None:
+            raise HTTPException(status_code=503, detail="runtime not started")
+        if repo.get_execution(decision_id) is None:
+            raise HTTPException(status_code=404, detail=f"No execution for {decision_id}")
+        reconciler = ExecutionReconciler(repository=repo, provider=lambda: adapter)
+        result = await reconciler.reconcile(decision_id)
+        return {"reconciled": True, "decision_id": decision_id, **result}
 
     @app.post("/v1/runtime/start")
     async def runtime_start() -> Dict[str, Any]:

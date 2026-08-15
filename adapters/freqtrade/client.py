@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 import httpx
@@ -10,10 +11,88 @@ import httpx
 from .config import FreqtradeAdapterConfig
 from .errors import (
     AdapterUnavailableError,
+    AmbiguousExecutionError,
     AuthenticationError,
     FreqtradeAdapterError,
     InvalidProviderResponseError,
 )
+
+
+@dataclass
+class ForceEntryRequest:
+    """Typed request payload for the Freqtrade 2026.6 ``/api/v1/forceenter``.
+
+    Only fields the provider actually accepts are carried. Unsupported /
+    uncertain fields are excluded rather than fabricated. Freqtrade force-entry
+    accepts (per the 2026.6 REST contract):
+
+      pair          — exchange pair, e.g. BTC/USDT:USDT
+      side          — long | short
+      price         — optional limit price
+      ordertype     — optional order type (limit | market)
+      stakeamount   — optional stake amount
+      leverage      — optional leverage (spot=1)
+      entry_tag     — optional provenance tag
+
+    ``trade_id`` resolves *after* the response; it is not a requested payload
+    field for forceenter (Freqtrade assigns the trade id).
+    """
+
+    pair: str
+    side: str = "long"
+    price: Optional[float] = None
+    ordertype: Optional[str] = None
+    stakeamount: Optional[float] = None
+    leverage: Optional[float] = None
+    entry_tag: Optional[str] = None
+
+    def as_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"pair": self.pair, "side": self.side}
+        if self.price is not None:
+            payload["price"] = self.price
+        if self.ordertype is not None:
+            payload["ordertype"] = self.ordertype
+        if self.stakeamount is not None:
+            payload["stakeamount"] = self.stakeamount
+        if self.leverage is not None:
+            payload["leverage"] = self.leverage
+        if self.entry_tag is not None:
+            payload["entry_tag"] = self.entry_tag
+        return payload
+
+
+def build_force_entry_request(
+    *,
+    pair: str,
+    side: str,
+    stake_amount: Optional[float] = None,
+    order_type: Optional[str] = None,
+    limit_price: Optional[float] = None,
+    leverage: Optional[float] = None,
+    entry_tag: Optional[str] = None,
+) -> ForceEntryRequest:
+    """Build a typed :class:`ForceEntryRequest`.
+
+    ``market`` is the Freqtrade-safe default when an ``order_type`` of "market"
+    is requested (map "market" -> "market", "limit" -> "limit", otherwise omit
+    ``ordertype`` and let Freqtrade use its configured default).
+    """
+    ordertype: Optional[str] = None
+    if order_type is not None:
+        ot = str(order_type).strip().lower()
+        if ot in ("market", "limit"):
+            ordertype = ot
+        else:
+            ordertype = None
+    return ForceEntryRequest(
+        pair=pair,
+        side=side,
+        price=limit_price,
+        ordertype=ordertype,
+        stakeamount=stake_amount,
+        leverage=leverage,
+        entry_tag=entry_tag,
+    )
 
 
 class FreqtradeClient:
@@ -90,6 +169,49 @@ class FreqtradeClient:
             f"Freqtrade endpoint unreachable at {self.base_url}: {last_error}"
         )
 
+    async def _request_execution(self, method: str, path: str, **kwargs: Any) -> Any:
+        """Provider execution request that NEVER blindly retries on timeout.
+
+        For execution endpoints (forceenter / forceexit / cancel), a
+        connection or read timeout leaves provider acceptance UNKNOWN. We must
+        not automatically replay a trade submission. On such a timeout we raise
+        :class:`AmbiguousExecutionError` so the caller marks the decision
+        ``ambiguous`` and triggers reconciliation instead of retrying.
+        """
+        url = f"{self.api_base}{path}"
+        headers = self._headers()
+        try:
+            response = await self._client.request(method, url, headers=headers, **kwargs)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+            raise AmbiguousExecutionError(
+                f"Provider execution outcome unknown for {path} (timeout): {exc}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise FreqtradeAdapterError(
+                f"Provider execution request failed for {path}: {exc}"
+            ) from exc
+
+        if response.status_code in (401, 403):
+            raise AuthenticationError(
+                f"Freqtrade authentication failed at {self.base_url} (status {response.status_code})"
+            )
+        if response.status_code == 404:
+            raise FreqtradeAdapterError(f"Freqtrade endpoint not found: {path}")
+        if 400 <= response.status_code < 500:
+            raise FreqtradeAdapterError(
+                f"Freqtrade client error {response.status_code} for {path}: {response.text[:200]}"
+            )
+        if response.status_code >= 500:
+            raise FreqtradeAdapterError(
+                f"Freqtrade server error {response.status_code} for {path}: {response.text[:200]}"
+            )
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise InvalidProviderResponseError(
+                f"Freqtrade returned invalid JSON for {path}"
+            ) from exc
+
     def _headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {}
         if self._config.api_token:
@@ -161,18 +283,65 @@ class FreqtradeClient:
     async def reload_config(self) -> Dict[str, Any]:
         return await self._request("POST", "/reload_config")
 
+    async def forceenter_ext(
+        self, request: ForceEntryRequest
+    ) -> Dict[str, Any]:
+        """Submit a typed force-entry request (no auto-retry on timeout)."""
+        return await self._request_execution(
+            "POST", "/forceenter", json=request.as_payload()
+        )
+
     async def forceenter(self, pair: str, side: str = "long") -> Dict[str, Any]:
         payload = {"pair": pair, "side": side}
-        return await self._request("POST", "/forceenter", json=payload)
+        return await self._request_execution("POST", "/forceenter", json=payload)
 
     async def forceexit(self, trade_id: int) -> Dict[str, Any]:
-        return await self._request("POST", "/forceexit", json={"tradeid": trade_id})
+        return await self._request_execution(
+            "POST", "/forceexit", json={"tradeid": trade_id}
+        )
 
     async def delete_trade(self, trade_id: int) -> Dict[str, Any]:
-        return await self._request("DELETE", f"/trades/{trade_id}")
+        return await self._request_execution("DELETE", f"/trades/{trade_id}")
 
     async def cancel_open_order(self, trade_id: int) -> Dict[str, Any]:
-        return await self._request("DELETE", f"/trades/{trade_id}/open-order")
+        return await self._request_execution(
+            "DELETE", f"/trades/{trade_id}/open-order"
+        )
+
+    # ── Remote execution-readiness gates (fail closed on uncertainty) ───────
+
+    async def remote_dry_run_status(self) -> Dict[str, Any]:
+        """Return verified remote Freqtrade dry-run configuration.
+
+        Returns ``{"runmode":..., "dry_run":...}`` derived from the live
+        ``/show_config`` response. Never trusts an env var — the provider is
+        the source of truth.
+        """
+        show = await self.show_config()
+        if not isinstance(show, dict):
+            raise InvalidProviderResponseError("show_config did not return an object")
+        runmode = str(show.get("runmode", "")).strip().lower()
+        dry_run_raw = show.get("dry_run")
+        dry_run = dry_run_raw if isinstance(dry_run_raw, bool) else None
+        if dry_run is None and runmode:
+            dry_run = runmode == "dry_run"
+        return {
+            "runmode": runmode,
+            "dry_run": bool(dry_run),
+            "dry_run_determined": dry_run is not None,
+        }
+
+    async def remote_force_entry_enabled(self) -> bool:
+        """Return provider force_entry_enable, raising if unknown/absent."""
+        show = await self.show_config()
+        if not isinstance(show, dict):
+            raise InvalidProviderResponseError("show_config did not return an object")
+        fe = show.get("force_entry_enable")
+        if not isinstance(fe, bool):
+            raise InvalidProviderResponseError(
+                "force_entry_enable not present in show_config"
+            )
+        return fe
 
     async def measure_latency(self) -> float:
         """Measure latency by making a real lightweight request to /ping.

@@ -16,9 +16,14 @@ from domain import (
     RuntimeStatus,
 )
 
-from .client import FreqtradeClient
+from .client import FreqtradeClient, build_force_entry_request
 from .config import FreqtradeAdapterConfig
-from .errors import ExecutionDisabledError, FreqtradeAdapterError
+from .errors import (
+    AmbiguousExecutionError,
+    ExecutionDisabledError,
+    FreqtradeAdapterError,
+    InvalidProviderResponseError,
+)
 from .mapper import map_balance, map_health, map_position, normalize_runtime_state
 
 CAPABILITIES = {
@@ -160,27 +165,77 @@ class FreqtradeAdapter(TradingAdapter):
             "Market state requires a data provider; not exposed by Freqtrade REST API directly"
         )
 
+    async def verify_execution_gate(self, command: ExecutionCommand) -> tuple[bool, Optional[str]]:
+        """Verify remote provider gate immediately before any execution request.
+
+        Fails CLOSED on any uncertainty:
+          * remote show_config unavailable            → blocked
+          * remote dry_run != true                    → blocked
+          * force_entry_enable != true (for entries)  → blocked
+
+        ``dry_run``/``force_entry_enable`` come from the live provider payload,
+        never from an environment variable.
+        """
+        try:
+            dry = await self._client.remote_dry_run_status()
+        except Exception as exc:
+            return False, f"remote_backend_unavailable:{exc}"
+        if not dry.get("dry_run_determined") or dry.get("dry_run") is not True:
+            return False, "remote_backend_not_dry_run"
+        if command.action in ("enter_long", "enter_short"):
+            try:
+                force_entry = await self._client.remote_force_entry_enabled()
+            except Exception as exc:
+                return False, f"force_entry_config_unavailable:{exc}"
+            if not force_entry:
+                return False, "force_entry_disabled"
+        return True, None
+
     async def execute_order(self, command: ExecutionCommand) -> ExecutionResult:
         if not self._config.allow_execution:
             raise ExecutionDisabledError(
                 "Freqtrade execution is disabled (NIBLIT_FREQTRADE_ALLOW_EXECUTION=false)"
             )
-        if command.action in ("enter_long", "enter_short"):
-            raw = await self._client.forceenter(
-                pair=command.symbol,
-                side="long" if command.action == "enter_long" else "short",
+        # provenance tag: prefer provider-supported entry_tag, fall back to
+        # decision_id (which is also persisted locally for full attribution).
+        entry_tag = None
+        if command.decision_id:
+            from domain.trading_decision import _safe_provenance_tag
+
+            entry_tag = _safe_provenance_tag(command.decision_id)
+        try:
+            if command.action in ("enter_long", "enter_short"):
+                req = build_force_entry_request(
+                    pair=command.symbol,
+                    side="long" if command.action == "enter_long" else "short",
+                    stake_amount=command.stake_amount,
+                    order_type=command.order_type,
+                    limit_price=command.limit_price,
+                    leverage=command.leverage,
+                    entry_tag=entry_tag,
+                )
+                raw = await self._client.forceenter_ext(req)
+            elif command.action in ("exit_long", "exit_short"):
+                trade_id = int(command.metadata.get("trade_id", -1))
+                raw = await self._client.forceexit(trade_id)
+            else:
+                raise ExecutionDisabledError(
+                    f"Unsupported action for execution: {command.action}"
+                )
+        except AmbiguousExecutionError as exc:
+            return ExecutionResult(
+                success=False,
+                status="ambiguous",
+                error=str(exc),
+                raw={"decision_id": command.decision_id, "provider_tag": entry_tag},
             )
-        elif command.action in ("exit_long", "exit_short"):
-            trade_id = int(command.metadata.get("trade_id", -1))
-            raw = await self._client.forceexit(trade_id)
-        else:
-            raise ExecutionDisabledError(f"Unsupported action for execution: {command.action}")
         return ExecutionResult(
             success=True,
             status="submitted",
             provider_trade_id=str(raw.get("trade_id", "")),
-            raw=raw if isinstance(raw, dict) else {},
+            raw=_merge_tag(raw, entry_tag),
         )
+
 
     async def cancel_order(self, command: ExecutionCommand) -> ExecutionResult:
         if not self._config.allow_execution:
@@ -209,3 +264,59 @@ class FreqtradeAdapter(TradingAdapter):
 
     async def ping(self) -> Dict[str, Any]:
         return await self._client.ping()
+
+    @property
+    def client(self) -> FreqtradeClient:
+        return self._client
+
+    # ── Reconciliation support (read-only) ───────────────────────────────────
+
+    async def get_trade(self, trade_id: Any) -> Optional[Dict[str, Any]]:
+        """Look up a single Freqtrade trade by id (read-only)."""
+        try:
+            tid = int(trade_id)
+        except (TypeError, ValueError):
+            tid = int(str(trade_id).split("-")[-1]) if str(trade_id).replace("-", "").isdigit() else -1
+        if tid < 0:
+            return None
+        try:
+            raw = await self._client.trade(tid)
+        except FreqtradeAdapterError:
+            return None
+        return raw if isinstance(raw, dict) else None
+
+    async def search_by_tag(self, tag: str) -> Optional[Dict[str, Any]]:
+        """Search recent Freqtrade trades for a Niblit provenance tag (read-only)."""
+        if not tag:
+            return None
+        try:
+            trades = await self._client.trades(limit=200)
+        except FreqtradeAdapterError:
+            trades = []
+        if not isinstance(trades, list):
+            return None
+        for t in trades:
+            if isinstance(t, dict) and t.get("enter_tag") == tag:
+                return t
+        return None
+
+    async def explicit_absence(self, record: Dict[str, Any]) -> bool:
+        """Return True when the provider explicitly confirms the trade is absent.
+
+        Used only as a last-resort diagnostic heuristic when no strong evidence
+        (trade_id / tag) matched. Returns True when a recorded provider_trade_id
+        is explicitly not found by the provider.
+        """
+        trade_id = record.get("provider_trade_id")
+        if not trade_id:
+            return False
+        found = await self.get_trade(trade_id)
+        return found is None
+
+
+def _merge_tag(raw: Any, entry_tag: Optional[str]) -> Dict[str, Any]:
+    """Attach the Niblit provenance tag to the raw provider response."""
+    base = dict(raw) if isinstance(raw, dict) else {}
+    if entry_tag is not None:
+        base["provider_tag"] = entry_tag
+    return base
