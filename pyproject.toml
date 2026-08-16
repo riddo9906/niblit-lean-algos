@@ -38,7 +38,35 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["*"]
+include = [
+    "niblit_lean_algos*",
+    "adapters*",
+    "algorithms*",
+    "api*",
+    "cli*",
+    "config*",
+    "configs*",
+    "docs*",
+    "domain*",
+    "examples*",
+    "freqtrade_bridge*",
+    "freqtrade_strategies*",
+    "nibblebots*",
+    "niblit_bridge*",
+    "persistence*",
+    "risk*",
+    "runtime_traces*",
+    "scripts*",
+    "services*",
+    "tests*",
+]
+
+# The root modules (manager.py, main.py) are imported as top-level modules by the
+# authoritative implementation (e.g. `from manager import TradingRuntimeManager` inside
+# both root manager.py and the niblit_lean_algos wrappers). Expose them explicitly so
+# the editable/venv install can import them without sys.path hacks.
+[tool.setuptools]
+py-modules = ["manager", "main"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
