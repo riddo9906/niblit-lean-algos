@@ -71,6 +71,7 @@ class ExecutionCoordinator:
         market_state: Optional[MarketState] = None,
         already_executed_ids: Optional[set[str]] = None,
         require_market_state: bool = False,
+        realized_pnl_today: float = 0.0,
     ) -> ExecutionResult:
         if self._repository.has_decision(decision.decision_id):
             # Persistent idempotency: any in-flight or terminal record blocks a
@@ -113,6 +114,7 @@ class ExecutionCoordinator:
             decision=decision,
             portfolio_value=portfolio_value,
             open_positions=open_positions,
+            realized_pnl_today=realized_pnl_today,
         )
         if not risk.approved:
             log.info("[Trading] Risk: rejected violations=%s", risk.violations)
@@ -176,7 +178,7 @@ class ExecutionCoordinator:
         # response below).
         provider_tag = decision.provider_entry_tag() if decision.decision_id else None
         self._repository.record_request(
-            decision.decision_id, vars(command), "freqtrade",
+            decision.decision_id, vars(command), adapter_health.backend,
             execution_mode=self._execution_mode,
             validation_result={
                 "valid": True,
@@ -200,6 +202,7 @@ class ExecutionCoordinator:
             )
 
         try:
+            command.metadata = {**command.metadata, "provider_tag": provider_tag}
             result = await self._adapter.execute_order(command)
         except Exception as exc:
             log.error("[Trading] Execution provider error: %s", exc)
@@ -227,6 +230,11 @@ class ExecutionCoordinator:
                 result.provider_trade_id,
                 provider_tag=tag_from_result or provider_tag,
             )
+            if adapter_health.backend == "paper" and result.status == "filled":
+                confirmed = "confirmed_closed" if command.action.startswith("exit_") else "confirmed_open"
+                self._repository.mark_status(decision.decision_id, confirmed)
+                self._repository.update_reconciliation(decision.decision_id, confirmed,
+                    result=_result_dict(result), provider_trade_id=result.provider_trade_id)
         else:
             self._repository.mark_failed(decision.decision_id, error_category="provider_rejected")
         return result

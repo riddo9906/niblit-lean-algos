@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import os
+from pathlib import Path
+import tempfile
+import subprocess
+import sys
+from urllib.request import urlopen
 import threading
 import time
 from dataclasses import dataclass, field
@@ -131,7 +137,16 @@ class TradingRuntimeManager:
     ):
         self._backend = backend or os.getenv("NIBLIT_TRADING_BACKEND", "paper")
         self._execution_mode = execution_mode or os.getenv("NIBLIT_TRADING_MODE", "observe")
+        self._control_file = Path(os.getenv('NIBLIT_TRADING_CONTROL_FILE',
+            str(Path(os.getenv('NIBLIT_PAPER_STATE_FILE','paper_state.json')).with_suffix('.control.json'))))
+        if self._backend == 'paper' and self._control_file.exists():
+            saved = json.loads(self._control_file.read_text())
+            if saved.get('mode') not in ('paper','observe'): raise ValueError('Invalid persisted paper control mode')
+            self._execution_mode = saved['mode']
         self._state = "created"
+        self._execution_lock = asyncio.Lock()
+        self._strategy_process = None
+        self._strategy_log = None
         self._started_at: Optional[datetime] = None
         self._stopped_at: Optional[datetime] = None
         self._last_transition_at: datetime = datetime.now(timezone.utc)
@@ -261,6 +276,12 @@ class TradingRuntimeManager:
 
         if provider_name == "mock":
             return MockMarketDataProvider()
+        if provider_name == 'replay':
+            if self._backend != 'paper': raise ValueError('Historical replay is restricted to the paper backend')
+            from services.replay_market_data_provider import ReplayMarketDataProvider
+            self._market_data_config['timeframe'] = '1h'
+            self._market_data_config['exchange'] = 'recorded_binance'
+            return ReplayMarketDataProvider()
         if provider_name == "ccxt":
             return CCXTMarketDataProvider(
                 exchange=exchange,
@@ -321,8 +342,17 @@ class TradingRuntimeManager:
             self._transition("failed", "backend_init_failed")
             return
 
+        if self._backend == "paper":
+            await self._adapter.start()
+
+        if self._resolve_market_data_provider_name() == 'replay':
+            try: await self._ensure_strategy_worker()
+            except Exception as exc:
+                self._transition('failed',str(exc))
+                raise
+
         # Stage: market_data
-        market_required = self._backend == "freqtrade" or self._resolve_market_data_provider_name() == "ccxt"
+        market_required = self._backend == "freqtrade" or self._resolve_market_data_provider_name() in ("ccxt", "replay")
 
         def _init_market_data():
             self._market_data = self._build_market_data_provider()
@@ -428,6 +458,14 @@ class TradingRuntimeManager:
             print(f"  [{name}] {stage.status}")
 
     async def stop(self) -> None:
+        if self._strategy_process is not None:
+            if self._strategy_process.poll() is None:
+                self._strategy_process.terminate()
+                try: await asyncio.to_thread(self._strategy_process.wait,10)
+                except subprocess.TimeoutExpired: self._strategy_process.kill()
+            self._strategy_process=None
+        if self._strategy_log is not None:
+            self._strategy_log.close(); self._strategy_log=None
         """Graceful shutdown."""
         if self._state in ("stopped", "failed"):
             return
@@ -476,7 +514,7 @@ class TradingRuntimeManager:
         try:
             h = await self._adapter.health()
             overall = bool(h.healthy) and self._state in ("ready", "degraded")
-            if self._backend == "freqtrade" and not market_info.get("healthy"):
+            if (self._backend == "freqtrade" or self._resolve_market_data_provider_name() in ('replay', 'ccxt')) and not market_info.get("healthy"):
                 overall = False
             return TradingRuntimeHealth(
                 backend=self._backend,
@@ -512,6 +550,8 @@ class TradingRuntimeManager:
         balances = await self._adapter.get_balances()
         positions = await self._adapter.get_open_positions()
         total = sum(b.total for b in balances)
+        if self._backend == "paper":
+            total = self._adapter.portfolio_equity
         available = sum(b.free for b in balances)
         stages = [
             {"name": s.name, "status": s.status, "duration_ms": s.duration_ms}
@@ -635,6 +675,11 @@ class TradingRuntimeManager:
 
         open_positions = list(await self._adapter.get_open_positions())
         balances = list(await self._adapter.get_balances())
+        if decision.action.startswith("exit_") and decision.stake_amount is None:
+            matching = next((p for p in open_positions if p.symbol == decision.symbol
+                             and p.side == ("long" if decision.action == "exit_long" else "short")), None)
+            if matching is not None:
+                decision.stake_amount = matching.stake_amount
         portfolio_value = sum(b.total for b in balances)
 
         pairs = await self._get_pair_lists()
@@ -717,6 +762,74 @@ class TradingRuntimeManager:
         return result
 
     async def execute_decision(self, decision: TradingDecision) -> ExecutionResult:
+        async with self._execution_lock:
+            return await self._execute_decision(decision)
+
+    async def set_paper_enabled(self, enabled: bool) -> dict:
+        if self._backend != 'paper': raise PermissionError('Paper control cannot operate a live or external backend')
+        async with self._execution_lock:
+            if enabled and self._resolve_market_data_provider_name() not in ('replay','ccxt'):
+                raise ValueError('Paper activation requires recorded replay data or a real market feed; mock quotes are not an operator trading feed')
+            if enabled and (self._state != 'ready' or self._market_data is None or not (await self._market_data.health()).healthy):
+                raise ValueError('The configured paper market feed must be healthy before activation')
+            old=self._execution_mode
+            mode='paper' if enabled else 'observe'
+            self._control_file.parent.mkdir(parents=True,exist_ok=True)
+            filename=None
+            try:
+                with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=self._control_file.parent,delete=False) as stream:
+                    filename=stream.name; json.dump({'backend':'paper','mode':mode},stream); stream.flush(); os.fsync(stream.fileno())
+                os.replace(filename,self._control_file)
+                self._execution_mode=mode
+                if self._coordinator: self._coordinator._execution_mode=mode
+            except Exception:
+                self._execution_mode=old
+                raise
+            finally:
+                if filename and os.path.exists(filename): os.unlink(filename)
+            return {'backend':'paper','mode':mode,'execution_enabled':enabled}
+
+    async def paper_account(self) -> dict:
+        if self._backend != 'paper' or self._adapter is None:
+            raise PermissionError('This operation requires the paper backend')
+        market=None
+        if self._resolve_market_data_provider_name() == 'replay':
+            observation=await asyncio.to_thread(self._market_data._read)
+            self._adapter.set_price(observation['symbol'],observation['last'])
+            market={key:observation[key] for key in ('source','clock_kind','as_of','dataset','data_sha256','strategy','cursor','total_candles','symbol','last','done')}
+        return {'backend':'paper','mode':self._execution_mode,'state':self._state,
+                'market':market,'account':self._adapter.account()}
+
+    async def _ensure_strategy_worker(self):
+        url=f"http://127.0.0.1:{int(os.getenv('NIBLIT_STRATEGY_API_PORT','8150'))}/health"
+        def ready():
+            try:
+                with urlopen(url,timeout=1) as response: health=json.load(response)
+                return health.get('service')=='niblit-freqtrade-strategy' and health.get('healthy') is True
+            except Exception: return False
+        if await asyncio.to_thread(ready): return
+        root=Path(sys.executable).parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
+        if getattr(sys,'frozen',False):
+            command=[str(root.parent/'freqtrade/niblit-freqtrade-worker.exe')]
+        else:
+            interpreter=Path(os.getenv('NIBLIT_FREQTRADE_PYTHON',str(root.parent/'freqtrade/.venv/Scripts/python.exe')))
+            command=[str(interpreter),'-m','freqtrade_bridge.offline_worker']
+        if not Path(command[0]).is_file(): raise RuntimeError('The Freqtrade strategy runtime is missing')
+        log_path=Path(os.getenv('NIBLIT_PAPER_STATE_FILE','paper_state.json')).parent/'strategy-worker.log'
+        log_path.parent.mkdir(parents=True,exist_ok=True)
+        self._strategy_log=log_path.open('a',encoding='utf-8')
+        environment=dict(os.environ)
+        environment['PYTHONPATH']=str(root)+os.pathsep+environment.get('PYTHONPATH','')
+        self._strategy_process=subprocess.Popen(command,cwd=str(root),env=environment,
+            stdout=self._strategy_log,stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        deadline=time.monotonic()+30
+        while time.monotonic()<deadline and self._strategy_process.poll() is None:
+            if await asyncio.to_thread(ready): return
+            await asyncio.sleep(.25)
+        raise RuntimeError('Freqtrade strategy runtime failed to become ready; inspect strategy-worker.log')
+
+    async def _execute_decision(self, decision: TradingDecision) -> ExecutionResult:
         if self._coordinator is None or self._adapter is None:
             raise RuntimeError("Manager not started")
         ctx = await self._build_validation_context(decision)
@@ -731,6 +844,21 @@ class TradingRuntimeManager:
                 status="validation_failed",
                 error="; ".join(errors),
             )
+        if self._backend == "paper" and ctx["market_state"] is not None:
+            expected=decision.metadata.get('market_timestamp')
+            actual=ctx['market_state'].ticker.timestamp.isoformat()
+            if expected and expected != actual:
+                return ExecutionResult(success=False,status='validation_failed',error='Replay quote changed before execution')
+            decision.metadata={**decision.metadata,'market_timestamp':actual,'market_source':ctx['market_state'].source}
+            self._adapter.set_price(decision.symbol, float(ctx["market_state"].ticker.last))
+        realized_today = 0.0
+        if self._backend == 'paper' and ctx['market_state'] is not None:
+            trading_date = ctx['market_state'].ticker.timestamp.date()
+            account = self._adapter.account()
+            for position in account.get('positions', []):
+                closed = position.get('closed_at')
+                if closed and datetime.fromisoformat(str(closed)).date() == trading_date:
+                    realized_today += float(position.get('profit_amount') or 0)
         return await self._coordinator.process_decision(
             decision=decision,
             open_positions=ctx["open_positions"],
@@ -741,6 +869,7 @@ class TradingRuntimeManager:
             market_state=ctx["market_state"],
             already_executed_ids=ctx["already_executed_ids"],
             require_market_state=ctx["require_market_state"],
+            realized_pnl_today=realized_today,
         )
 
     def get_boot_stages(self) -> List[Dict[str, Any]]:

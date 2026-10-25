@@ -87,6 +87,8 @@ class ExecutionRepository:
 
     def __init__(self, db_path: str = "niblit_executions.db"):
         self._db_path = Path(db_path)
+        if str(db_path) != ':memory:':
+            self._db_path.parent.mkdir(parents=True,exist_ok=True)
         self._lock = threading.RLock()
         # check_same_thread=False: trading API may serve requests on worker
         # threads distinct from the boot thread that opened the connection.

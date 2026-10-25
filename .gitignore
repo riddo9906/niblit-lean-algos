@@ -30,6 +30,7 @@ niblit/
 *_state.json
 *.jsonl
 niblit_*.json
+niblit_memory.json.backup
 
 # Pickle / memory graphs
 *.pkl
@@ -74,3 +75,54 @@ niblit-env/
 !lean.json
 !requirements.txt
 !README.md
+
+# Local environment overrides and backups; keep configuration templates
+.env.*
+*.env.*
+!.env.example
+!.env.*.example
+!*.env.example
+!*.env.template
+!*.env.sample
+
+# Additional local dependency, packaging, and test outputs
+venv/
+__pypackages__/
+node_modules/
+target/
+.pytest_cache/
+/.pytest_push_*/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.whl
+
+# Trading state and local model/database assets
+.niblit/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.gguf
+*.safetensors
+*.onnx
+
+# One-off root probes and editor backups
+/_[!_]*
+*.tmp
+*.bak
+*.bak.*
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini

@@ -58,6 +58,9 @@ class DecisionRequest(BaseModel):
     leverage: float | None = None
     metadata: Dict[str, Any] = {}
 
+class PaperControlRequest(BaseModel):
+    enabled: bool
+
 
 def _serialize_ticker(ticker: Any) -> Dict[str, Any]:
     return {
@@ -137,6 +140,18 @@ def create_app(manager: TradingRuntimeManager) -> FastAPI:
     # Non-secret runtime identity for development diagnostics.
     # Correlates the Core and API manager instances.
     manager_instance_id = str(id(manager))
+
+    @app.get('/v1/paper/account')
+    async def paper_account():
+        if manager.backend != 'paper': raise HTTPException(403,'Paper account requires the paper backend')
+        try: return await manager.paper_account()
+        except Exception as exc: raise HTTPException(503,str(exc)) from exc
+
+    @app.post('/v1/paper/control')
+    async def paper_control(request:PaperControlRequest):
+        try: return await manager.set_paper_enabled(request.enabled)
+        except PermissionError as exc: raise HTTPException(403,str(exc)) from exc
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
     def _market_block() -> Dict[str, Any]:
         cfg = getattr(manager, "_market_data_config", {}) or {}
@@ -363,7 +378,7 @@ def create_app(manager: TradingRuntimeManager) -> FastAPI:
         result = await manager.execute_decision(decision)
         raw = result.raw if isinstance(result.raw, dict) else {}
         existing = None
-        if result.status == "duplicate":
+        if result.status == "duplicate" or result.success:
             repo = getattr(manager, "_repository", None)
             if repo is not None:
                 existing = repo.get_execution(decision.decision_id)
@@ -373,7 +388,7 @@ def create_app(manager: TradingRuntimeManager) -> FastAPI:
             "status": result.status,
             "error": result.error,
             "trade_id": result.provider_trade_id,
-            "execution_state": result.status,
+            "execution_state": (existing or {}).get('status',result.status),
             "provider_trade_id": result.provider_trade_id,
             "reconciliation_state": (existing or {}).get("reconciliation_status")
             if existing else raw.get("reconciliation_status"),

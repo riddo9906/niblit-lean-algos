@@ -87,10 +87,10 @@ class DecisionValidator:
                     errors.append("stale_market_data")
 
         # ── Portfolio validation ─────────────────────────────────────────────
-        if len(open_positions) >= self._policy.maximum_open_positions:
+        if decision.action.startswith("enter_") and len(open_positions) >= self._policy.maximum_open_positions:
             errors.append("maximum_open_positions_exceeded")
         symbol_positions = [p for p in open_positions if p.symbol == decision.symbol]
-        if len(symbol_positions) >= self._policy.maximum_positions_per_symbol:
+        if decision.action.startswith("enter_") and len(symbol_positions) >= self._policy.maximum_positions_per_symbol:
             errors.append("maximum_positions_per_symbol_exceeded")
 
         # Sufficient funds — fail closed when portfolio cannot be valued on
@@ -119,6 +119,7 @@ class DecisionValidator:
                 take_profit=decision.take_profit,
                 leverage=decision.leverage,
                 decision_id=decision.decision_id,
+                metadata={**decision.metadata,'strategy':decision.strategy},
             )
 
         return ValidationResult(

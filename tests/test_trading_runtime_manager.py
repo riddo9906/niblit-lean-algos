@@ -9,6 +9,14 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_account(tmp_path, monkeypatch):
+    monkeypatch.setenv('NIBLIT_PAPER_STATE_FILE', str(tmp_path / 'account.json'))
+    monkeypatch.setenv('NIBLIT_TRADING_CONTROL_FILE', str(tmp_path / 'control.json'))
+    monkeypatch.setenv('NIBLIT_EXECUTION_DB', str(tmp_path / 'executions.sqlite'))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

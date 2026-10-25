@@ -56,7 +56,7 @@ class MarketStateService:
         """
         tf = timeframe or self._timeframe
         cache_key = f"{symbol}:{tf}"
-        if not force_refresh and self.is_fresh(cache_key):
+        if not force_refresh and not getattr(self._provider,'always_refresh',False) and self.is_fresh(cache_key):
             cached = self._cache.get(cache_key)
             if cached is not None:
                 return cached
@@ -86,7 +86,7 @@ class MarketStateService:
         timeframe: Optional[str] = None,
     ) -> MarketState:
         """Update the cached market state for a symbol."""
-        now = datetime.now(timezone.utc)
+        now = self._provider.clock_now() if callable(getattr(self._provider,'clock_now',None)) else datetime.now(timezone.utc)
         candle_list = list(candles) if candles else []
         volatility = self._compute_volatility(candle_list)
         trend = self._compute_trend(candle_list)
@@ -133,7 +133,8 @@ class MarketStateService:
             if not state.is_fresh:
                 return False
             if state.age_seconds is not None:
-                return state.age_seconds <= self._max_staleness_seconds
+                elapsed=max(0.0,(datetime.now(timezone.utc)-state.timestamp).total_seconds())
+                return state.age_seconds + elapsed <= self._max_staleness_seconds
         last = self._last_refresh.get(symbol)
         if last is None:
             return False

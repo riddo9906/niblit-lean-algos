@@ -62,18 +62,18 @@ class RiskEngine:
             violations.append("leverage_exceeds_limit")
 
         # Open positions
-        if len(open_positions) >= self._policy.maximum_open_positions:
+        if decision.action.startswith("enter_") and len(open_positions) >= self._policy.maximum_open_positions:
             violations.append("maximum_open_positions_exceeded")
 
         # Per-symbol exposure
         symbol_positions = [p for p in open_positions if p.symbol == decision.symbol]
-        if len(symbol_positions) >= self._policy.maximum_positions_per_symbol:
+        if decision.action.startswith("enter_") and len(symbol_positions) >= self._policy.maximum_positions_per_symbol:
             violations.append("maximum_positions_per_symbol_exceeded")
 
         # Maximum total exposure — must be enforced (fail closed when portfolio
         # cannot be valued). Exposure = committed stake / portfolio value.
         stake = decision.stake_amount or 0.0
-        if portfolio_value > 0:
+        if portfolio_value > 0 and decision.action.startswith("enter_"):
             existing_exposure = sum(
                 float(getattr(p, "stake_amount", 0.0) or 0.0) for p in open_positions
             )
@@ -84,7 +84,7 @@ class RiskEngine:
                 warnings.append(
                     f"total_exposure={exposure_ratio:.3f} max={self._policy.maximum_total_exposure:.3f}"
                 )
-        elif decision.action != "hold":
+        elif portfolio_value <= 0 and decision.action != "hold":
             # Cannot value portfolio → unknown exposure → fail closed.
             violations.append("portfolio_value_unknown")
 
@@ -92,7 +92,7 @@ class RiskEngine:
         stake = decision.stake_amount or 0.0
         if stake <= 0:
             violations.append("stake_amount_non_positive")
-        else:
+        elif decision.action.startswith("enter_"):
             stake_pct = stake / portfolio_value if portfolio_value > 0 else 1.0
             max_stake = portfolio_value * self._policy.maximum_stake_percentage
             if self._policy.maximum_stake_per_trade and stake > self._policy.maximum_stake_per_trade:
@@ -105,7 +105,7 @@ class RiskEngine:
                 warnings.append(f"stake_reduced_to:{adjusted_stake}")
 
         # Daily loss
-        if portfolio_value > 0 and realized_pnl_today < -portfolio_value * self._policy.maximum_daily_loss:
+        if decision.action.startswith('enter_') and portfolio_value > 0 and realized_pnl_today < -portfolio_value * self._policy.maximum_daily_loss:
             violations.append("daily_loss_exceeded")
 
         # Compute risk score (deterministic)
