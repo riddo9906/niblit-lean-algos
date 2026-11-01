@@ -88,6 +88,13 @@ class NiblitAiMaster(NiblitSignalMixin, IStrategy):
     timeframe = "1h"
     can_short = False
 
+    @property
+    def protections(self) -> list[dict]:
+        """Keep the dry-run profile's guard in modern Freqtrade's strategy API."""
+        return [{"method": "StoplossGuard", "lookback_period_candles": 24,
+                 "trade_limit": 2, "stop_duration_candles": 4,
+                 "only_per_pair": False}]
+
     # Staged ROI: take quick profits early, hold winners progressively longer
     minimal_roi = {"0": 0.05, "30": 0.03, "60": 0.02, "120": 0.01}
 

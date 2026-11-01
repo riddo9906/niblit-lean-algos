@@ -4,7 +4,12 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 
 ROOT = Path(SPECPATH).resolve()
 FREQ = Path(os.environ.get('NIBLIT_FREQTRADE_ROOT', ROOT.parent / 'freqtrade')).resolve()
-datas = collect_data_files('freqtrade') + copy_metadata('freqtrade')
+# Freqtrade resolves pairlists/protections by scanning physical Python files.
+# Hidden imports alone do not satisfy that plugin discovery contract.
+datas = collect_data_files('freqtrade', include_py_files=True) + copy_metadata('freqtrade')
+datas += [(str(ROOT / 'configs/freqtrade_config_dry_run.json'), 'profiles'),
+          (str(ROOT / 'configs/freqtrade_config_binance.json'), 'profiles'),
+          (str(ROOT / 'freqtrade_strategies'), 'strategies')]
 for symbol in ('BTC', 'ETH'):
     data = FREQ / 'user_data/data/binance/futures' / f'{symbol}_USDT_USDT-1h-futures.feather'
     if not data.is_file():
@@ -13,7 +18,7 @@ for symbol in ('BTC', 'ETH'):
 if (FREQ / 'LICENSE').is_file():
     datas.append((str(FREQ / 'LICENSE'), 'licenses/freqtrade'))
 hidden = ['pyarrow.feather', 'talib', 'scipy', 'uvicorn', 'pandas_ta']
-for package in ('freqtrade.strategy', 'freqtrade_strategies', 'freqtrade_bridge', 'talib'):
+for package in ('freqtrade', 'freqtrade_strategies', 'freqtrade_bridge', 'talib'):
     hidden += collect_submodules(package)
 a = Analysis([str(ROOT / 'freqtrade_strategy_worker.py')], pathex=[str(ROOT), str(FREQ)],
     binaries=[], datas=datas, hiddenimports=hidden, hookspath=[], hooksconfig={},
