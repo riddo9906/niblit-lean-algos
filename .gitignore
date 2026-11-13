@@ -126,3 +126,17 @@ coverage.xml
 *.swo
 Thumbs.db
 Desktop.ini
+
+# Generated LEAN compiler and research scratch locations
+bin/
+obj/
+/research-output/
+/market-data-cache/
+*.pem
+*.key
+
+# Local authentication material; algorithms, fixtures and templates stay visible.
+/.secrets/
+*.token
+*.pfx
+*.p12

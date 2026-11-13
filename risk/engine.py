@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import math
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence
 
@@ -34,6 +35,22 @@ class RiskEngine:
         warnings: List[str] = []
         adjusted_stake: Optional[float] = None
         risk_score = 0.0
+
+        # NaN comparisons silently bypass ordinary limits. Reject non-finite
+        # account/decision/exposure inputs before doing any sizing arithmetic.
+        numbers = {"portfolio_value": portfolio_value, "realized_pnl_today": realized_pnl_today,
+                   "confidence": decision.confidence}
+        for name in ("stake_amount", "leverage", "limit_price", "stop_loss", "take_profit"):
+            value = getattr(decision, name, None)
+            if value is not None:
+                numbers[name] = value
+        for index, position in enumerate(open_positions):
+            numbers[f"position_stake_{index}"] = getattr(position, "stake_amount", None)
+        for name, value in numbers.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                violations.append(f"invalid_numeric:{name}")
+        if violations:
+            return RiskAssessment(approved=False, risk_score=1.0, violations=violations)
 
         # Confidence
         if not 0.0 <= decision.confidence <= 1.0:

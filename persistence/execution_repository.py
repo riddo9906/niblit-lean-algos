@@ -136,8 +136,8 @@ class ExecutionRepository:
         risk_result: Optional[Dict[str, Any]] = None,
         provider_tag: Optional[str] = None,
         status: str = "received",
-    ) -> None:
-        """Create (or refresh) an execution record for a decision.
+    ) -> bool:
+        """Atomically claim a decision; never overwrite earlier delivery evidence.
 
         Backward-compatible entry point. Default status is ``received`` — it is
         NOT ``submitted``. ``submitted`` is only written after a provider
@@ -146,7 +146,7 @@ class ExecutionRepository:
         with self._lock:
             now = _now()
             command_obj = command or {}
-            self._conn.execute(
+            cursor = self._conn.execute(
                 """
                 INSERT INTO executions (
                     decision_id, command, backend, request_timestamp, status,
@@ -154,19 +154,7 @@ class ExecutionRepository:
                     requested_stake, leverage,
                     validation_result, risk_result, provider_tag
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(decision_id) DO UPDATE SET
-                    command = excluded.command,
-                    backend = excluded.backend,
-                    status = excluded.status,
-                    schema_version = excluded.schema_version,
-                    execution_mode = excluded.execution_mode,
-                    symbol = excluded.symbol,
-                    action = excluded.action,
-                    requested_stake = excluded.requested_stake,
-                    leverage = excluded.leverage,
-                    validation_result = excluded.validation_result,
-                    risk_result = excluded.risk_result,
-                    provider_tag = excluded.provider_tag
+                ON CONFLICT(decision_id) DO NOTHING
                 """,
                 (
                     decision_id,
@@ -186,6 +174,7 @@ class ExecutionRepository:
                 ),
             )
             self._conn.commit()
+            return cursor.rowcount == 1
 
     def record_result(
         self,
