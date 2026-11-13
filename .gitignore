@@ -134,3 +134,9 @@ obj/
 /market-data-cache/
 *.pem
 *.key
+
+# Local authentication material; algorithms, fixtures and templates stay visible.
+/.secrets/
+*.token
+*.pfx
+*.p12
