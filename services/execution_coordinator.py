@@ -177,7 +177,7 @@ class ExecutionCoordinator:
         # (distinct from submitted — acceptance is only proven by the provider
         # response below).
         provider_tag = decision.provider_entry_tag() if decision.decision_id else None
-        self._repository.record_request(
+        claimed = self._repository.record_request(
             decision.decision_id, vars(command), adapter_health.backend,
             execution_mode=self._execution_mode,
             validation_result={
@@ -194,6 +194,10 @@ class ExecutionCoordinator:
             provider_tag=provider_tag,
             status="received",
         )
+        if claimed is False:
+            return ExecutionResult(success=False, status="duplicate",
+                error="Decision was claimed by another executor",
+                raw={"decision_id": decision.decision_id, "duplicate": True})
         self._repository.mark_submitting(decision.decision_id)
         if risk.adjusted_stake_amount is not None:
             self._repository.mark_status(
@@ -206,10 +210,13 @@ class ExecutionCoordinator:
             result = await self._adapter.execute_order(command)
         except Exception as exc:
             log.error("[Trading] Execution provider error: %s", exc)
-            self._repository.mark_failed(decision.decision_id, error_category="execution_error")
+            # Once adapter invocation begins, an exception cannot prove that
+            # the broker did not receive it. Preserve uncertainty for readback.
+            self._repository.mark_ambiguous(decision.decision_id,
+                {"status": "ambiguous", "error_category": "execution_error"})
             return ExecutionResult(
                 success=False,
-                status="execution_error",
+                status="ambiguous",
                 error=str(exc),
                 raw={"decision_id": decision.decision_id, "provider_tag": provider_tag},
             )
@@ -264,5 +271,7 @@ class ExecutionCoordinator:
         if self._execution_mode == "live":
             if self._live_acknowledgement != "I_UNDERSTAND_LIVE_TRADING_RISK":
                 return "execution_blocked: live trading acknowledgement missing or invalid"
-            return None
+            # Release boundary: a string/environment flag cannot authorize money.
+            # Future live activation must use Core's account-scoped authority.
+            return "execution_blocked: real-money submission is disabled in this release"
         return f"execution_blocked: unknown mode {self._execution_mode}"
